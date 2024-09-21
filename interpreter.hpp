@@ -108,7 +108,7 @@ std::string to_string(const value& val)
 
 std::string error_message(token t, const char* message)
 {
-  return fmt::format("Line {} at '{}': {}", t.line_number(), t.lexeme(), message);
+  return fmt::format("{} at '{}': {}", t.location(), t.lexeme(), message);
 }
 
 

@@ -11,6 +11,7 @@
 #include <string_view>
 #include <variant>
 #include <vector>
+#include "source_location.hpp"
 
 class token
 {
@@ -74,20 +75,20 @@ class token
       return "unknown";
     }
 
-    token(kind k, std::string lexeme, std::string literal, int line_number)
-      : kind_(k), lexeme_(lexeme), maybe_literal_(literal), line_number_(line_number)
+    token(kind k, std::string lexeme, std::string literal, source_location location)
+      : kind_(k), lexeme_(lexeme), maybe_literal_(literal), location_(location)
     {}
 
-    token(kind k, std::string lexeme, double literal, int line_number)
-      : kind_(k), lexeme_(lexeme), maybe_literal_(literal), line_number_(line_number)
+    token(kind k, std::string lexeme, double literal, source_location location)
+      : kind_(k), lexeme_(lexeme), maybe_literal_(literal), location_(location)
     {}
 
-    token(kind k, std::string lexeme, int line_number)
-      : kind_(k), lexeme_(lexeme), maybe_literal_(), line_number_(line_number)
+    token(kind k, std::string lexeme, source_location location)
+      : kind_(k), lexeme_(lexeme), maybe_literal_(), location_(location)
     {}
 
-    token(kind k, int line_number)
-      : kind_(k), lexeme_(), maybe_literal_(), line_number_(line_number)
+    token(kind k, source_location location)
+      : kind_(k), lexeme_(), maybe_literal_(), location_(location)
     {}
 
     kind which_kind() const
@@ -95,9 +96,9 @@ class token
       return kind_;
     }
 
-    int line_number() const
+    source_location location() const
     {
-      return line_number_;
+      return location_;
     }
 
     const char* lexeme() const
@@ -138,7 +139,7 @@ class token
         std::cout << " ";
       }
 
-      os << "line " << self.line_number_;
+      os << "line " << self.location().line << " column " << self.location().column;
 
       return os;
     }
@@ -159,7 +160,7 @@ class token
     kind kind_;
     std::string lexeme_;
     std::optional<std::variant<std::string,double>> maybe_literal_;
-    int line_number_;
+    source_location location_;
 
     static const std::map<std::string,kind> keywords_;
 };
@@ -188,8 +189,8 @@ const std::map<std::string,token::kind> token::keywords_ = {
 class token_stream
 {
   public:
-    token_stream(std::string_view source, int line_number = 0)
-      : source_(source), line_number_(line_number)
+    token_stream(std::string_view source, source_location loc = {})
+      : source_(source), loc_(loc)
     {}
 
     struct sentinel {};
@@ -240,32 +241,33 @@ class token_stream
       // this loop exits via return
       while(not is_at_end())
       {
+        source_location c_loc = loc_;
         char c = advance();
 
         switch(c)
         {
           // single-character lexemes
-          case '(': return {token::left_paren, line_number_};
-          case ')': return {token::right_paren, line_number_};
-          case '{': return {token::left_brace, line_number_};
-          case '}': return {token::right_brace, line_number_};
-          case ',': return {token::comma, line_number_};
-          case '.': return {token::dot, line_number_};
-          case '-': return {token::minus, line_number_};
-          case '+': return {token::plus, line_number_};
-          case ';': return {token::semicolon, line_number_};
-          case '*': return {token::star, line_number_};
+          case '(': return {token::left_paren, c_loc};
+          case ')': return {token::right_paren, c_loc};
+          case '{': return {token::left_brace, c_loc};
+          case '}': return {token::right_brace, c_loc};
+          case ',': return {token::comma, c_loc};
+          case '.': return {token::dot, c_loc};
+          case '-': return {token::minus, c_loc};
+          case '+': return {token::plus, c_loc};
+          case ';': return {token::semicolon, c_loc};
+          case '*': return {token::star, c_loc};
 
           // possibly double-character lexemes
-          case '!': return { advance_if_matches('=') ? token::bang_equal : token::bang, line_number_};
-          case '=': return { advance_if_matches('=') ? token::equal_equal : token::equal, line_number_};
-          case '<': return { advance_if_matches('=') ? token::less_equal : token::less, line_number_};
-          case '>': return { advance_if_matches('=') ? token::greater_equal : token::greater, line_number_};
+          case '!': return { advance_if_matches('=') ? token::bang_equal : token::bang, c_loc};
+          case '=': return { advance_if_matches('=') ? token::equal_equal : token::equal, c_loc};
+          case '<': return { advance_if_matches('=') ? token::less_equal : token::less, c_loc};
+          case '>': return { advance_if_matches('=') ? token::greater_equal : token::greater, c_loc};
 
           // newline
           case '\n':
           {
-            ++line_number_;
+            loc_.advance_line();
             break;
           }
 
@@ -283,7 +285,7 @@ class token_stream
             }
             else
             {
-              return {token::slash, line_number_};
+              return {token::slash, c_loc};
             }
 
             break;
@@ -300,7 +302,7 @@ class token_stream
           // string literals
           case '"':
           {
-            return expect_terminated_string();
+            return expect_terminated_string(c_loc);
           }
 
           default:
@@ -311,15 +313,15 @@ class token_stream
             }
             else if(c == '_' or std::isalpha(c))
             {
-              return expect_identifier(c);
+              return expect_identifier(c, c_loc);
             }
 
-            return {token::error, line_number_};
+            return {token::error, c_loc};
           }
         }
       }
 
-      return {token::eof, line_number_};
+      return {token::eof, loc_};
     }
 
     bool is_at_end() const
@@ -356,19 +358,19 @@ class token_stream
       assert(not is_at_end());
       char result = source_.front();
       source_.remove_prefix(1);
+      loc_.advance_column();
       return result;
     }
 
-    token expect_terminated_string()
+    token expect_terminated_string(source_location open_quote_loc)
     {
-      int original_line_number = line_number_;
       std::string lexeme;
 
       while(peek() != '"' and not is_at_end())
       {
         if(peek() == '\n')
         {
-          ++line_number_;
+          loc_.advance_line();
         }
 
         lexeme.push_back(advance());
@@ -376,7 +378,7 @@ class token_stream
 
       if(is_at_end())
       {
-        return {token::error, "Unterminated string", original_line_number};
+        return {token::error, "Unterminated string", open_quote_loc};
       }
 
       // consume terminating quote
@@ -385,12 +387,13 @@ class token_stream
       // XXX we'd handle escape sequences here
       std::string literal = lexeme;
 
-      return {token::string, lexeme, literal, original_line_number};
+      return {token::string, lexeme, literal, open_quote_loc};
     }
 
     token expect_number(char first_digit)
     {
       std::string lexeme;
+      source_location starting_loc = loc_;
       lexeme.push_back(first_digit);
 
       while(std::isdigit(peek()))
@@ -412,10 +415,10 @@ class token_stream
 
       double literal = std::atof(lexeme.c_str());
 
-      return {token::number, lexeme, literal, line_number_};
+      return {token::number, lexeme, literal, starting_loc};
     }
 
-    token expect_identifier(char first_character)
+    token expect_identifier(char first_character, source_location first_loc)
     {
       std::string lexeme;
       lexeme.push_back(first_character);
@@ -433,10 +436,10 @@ class token_stream
         lexeme.push_back(advance());
       }
 
-      return {token::classify_identifier(lexeme), lexeme, line_number_};
+      return {token::classify_identifier(lexeme), lexeme, first_loc};
     }
 
     std::string_view source_;
-    int line_number_;
+    source_location loc_;
 };
 

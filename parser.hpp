@@ -48,13 +48,13 @@ class parser
       {
         case token::eof:
         {
-          result = fmt::format("Line {} at end: {}", peek().line_number(), message);
+          result = fmt::format("{} at end: {}", peek().location(), message);
           break;
         }
 
         default:
         {
-          result = fmt::format("Line {} at '{}': {}", peek().line_number(), peek().lexeme(), message);
+          result = fmt::format("{} at '{}': {}", peek().location(), peek().lexeme(), message);
           break;
         }
       }
@@ -70,13 +70,13 @@ class parser
       {
         case token::eof:
         {
-          result = fmt::format("Line {} at end: {}", tok.line_number(), message);
+          result = fmt::format("{} at end: {}", tok.location(), message);
           break;
         }
 
         default:
         {
-          result = fmt::format("Line {} at '{}': {}", tok.line_number(), tok.lexeme(), message);
+          result = fmt::format("{} at '{}': {}", tok.location(), tok.lexeme(), message);
           break;
         }
       }
