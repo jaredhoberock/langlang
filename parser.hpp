@@ -186,7 +186,7 @@ class parser
     }
 
     // arguments := expression ( "," expression )*
-    std::vector<expression> expect_arguments()
+    std::expected<std::vector<expression>,std::string> parse_arguments()
     {
       std::vector<expression> result;
 
@@ -194,13 +194,14 @@ class parser
       {
         if(result.size() == 255)
         {
-          throw_error("Can't have more than 255 arguments.");
+          return std::unexpected("Can't have more than 255 arguments");
         }
 
         do
         {
           auto expr = parse_expression();
-          if(not expr) throw_error(expr);
+          if(not expr) return std::unexpected(expr.error());
+
           result.push_back(*expr);
         }
         while(match(token::comma));
@@ -217,12 +218,13 @@ class parser
 
       if(match(token::left_paren))
       {
-        std::vector<expression> arguments = expect_arguments();
+        auto args = parse_arguments();
+        if(not args) throw_error(args);
 
         auto rparen = parse_token(')') | format_error("{} after arguments");
         if(not rparen) throw_error(rparen);
 
-        result = call_expression{std::move(*result), arguments, *rparen};
+        result = call_expression{std::move(*result), *args, *rparen};
       }
 
       return *result;
