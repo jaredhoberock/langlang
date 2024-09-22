@@ -387,18 +387,18 @@ class parser
     }
 
     // print_statement := "print" expression ";"
-    print_statement expect_print_statement()
+    std::expected<print_statement,std::string> parse_print_statement()
     {
       auto print = parse_token(token::print) | format_error("{} before expression");
-      if(not print) throw_error(print);
+      if(not print) return std::unexpected(print.error());
 
       auto expr = parse_expression();
-      if(not expr) throw_error(expr);
+      if(not expr) return std::unexpected(expr.error());
 
       auto semi = parse_token(';') | format_error("{} after print expression");
-      if(not semi) throw_error(semi);
+      if(not semi) return std::unexpected(semi.error());
 
-      return {*expr};
+      return print_statement{*expr};
     }
 
     // if_statement := "if" "(" expression ")" statement ( "else" statement )?
@@ -546,7 +546,9 @@ class parser
     {
       if(peek().which_kind() == token::print)
       {
-        return expect_print_statement();
+        auto print = parse_print_statement();
+        if(not print) throw_error(print);
+        return *print;
       }
       else if(peek().which_kind() == token::if_)
       {
