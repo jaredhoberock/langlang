@@ -347,10 +347,10 @@ class parser
     }
 
     // assignment := IDENTIFIER "=" assignment | logical_or
-    expression expect_assignment()
+    std::expected<expression,std::string> parse_assignment()
     {
       auto result = parse_logical_or();
-      if(not result) throw_error(result);
+      if(not result) return result;
 
       if(std::optional eq = match(token::equal))
       {
@@ -359,9 +359,10 @@ class parser
           throw_error(*eq, "Invalid assignment target.");
         }
 
-        expression rhs = expect_assignment();
+        auto rhs = parse_assignment();
+        if(not rhs) return rhs;
 
-        result = assignment_expression{get<variable>(*result), rhs};
+        result = assignment_expression{get<variable>(*result), *rhs};
       }
 
       return *result;
@@ -370,19 +371,19 @@ class parser
     // expression := assignment
     std::expected<expression,std::string> parse_expression()
     {
-      return expect_assignment();
+      return parse_assignment();
     }
 
     // expression_statement := expression ";"
-    expression_statement expect_expression_statement()
+    std::expected<expression_statement,std::string> parse_expression_statement()
     {
       auto expr = parse_expression();
-      if(not expr) throw_error(expr);
+      if(not expr) return std::unexpected(expr.error());
 
       auto semi = parse_token(';') | format_error("{} after expression");
-      if(not semi) throw_error(semi);
+      if(not semi) return std::unexpected(semi.error());
 
-      return {*expr};
+      return expression_statement{*expr};
     }
 
     // print_statement := "print" expression ";"
@@ -477,16 +478,18 @@ class parser
       auto lparen = parse_token('(') | format_error("{} after 'for'");
       if(not lparen) throw_error(lparen);
 
-      std::optional<statement> initializer;
+      std::optional<statement> maybe_init;
       if(not match(token::semicolon))
       {
         if(peek().which_kind() == token::var)
         {
-          initializer = expect_variable_declaration();
+          maybe_init = expect_variable_declaration();
         }
         else
         {
-          initializer = expect_expression_statement();
+          auto init = parse_expression_statement();
+          if(not init) throw_error(init);
+          maybe_init = *init;
         }
       }
 
@@ -514,7 +517,7 @@ class parser
 
       statement body = expect_statement();
 
-      return {initializer, maybe_condition, maybe_increment, body};
+      return {maybe_init, maybe_condition, maybe_increment, body};
     }
 
     // block_statement := "{" declaration* "}"
@@ -564,7 +567,9 @@ class parser
         return expect_block_statement();
       }
 
-      return expect_expression_statement();
+      auto stmt = parse_expression_statement();
+      if(not stmt) throw_error(stmt);
+      return *stmt;
     }
 
     // variable_declaration := "var" IDENTIFIER ( "=" expression )? ";"
