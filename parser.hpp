@@ -429,24 +429,24 @@ class parser
     }
 
     // return_statement := "return" expression? ";"
-    return_statement expect_return_statement()
+    std::expected<return_statement,std::string> parse_return_statement()
     {
       auto ret = parse_token(token::return_) | format_error("{} before expression");
-      if(not ret) throw_error(ret);
+      if(not ret) return std::unexpected(ret.error());
 
       std::optional<expression> maybe_expr;
 
       if(peek().which_kind() != token::semicolon)
       {
         auto expr = parse_expression();
-        if(not expr) throw_error(expr);
+        if(not expr) return std::unexpected(expr.error());
         maybe_expr = *expr;
       }
 
       auto semi = parse_token(';') | format_error("{} after return value");
-      if(not semi) throw_error(semi);
+      if(not semi) return std::unexpected(semi.error());
 
-      return {*ret, maybe_expr};
+      return return_statement{*ret, maybe_expr};
     }
 
     // while_statement := "while" "(" expression ")" statement
@@ -556,7 +556,9 @@ class parser
       }
       else if(peek().which_kind() == token::return_)
       {
-        return expect_return_statement();
+        auto ret = parse_return_statement();
+        if(not ret) throw_error(ret);
+        return *ret;
       }
       else if(peek().which_kind() == token::while_)
       {
