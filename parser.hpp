@@ -483,7 +483,9 @@ class parser
       {
         if(peek().which_kind() == token::var)
         {
-          maybe_init = expect_variable_declaration();
+          auto init = parse_variable_declaration();
+          if(not init) throw_error(init);
+          maybe_init = *init;
         }
         else
         {
@@ -573,27 +575,27 @@ class parser
     }
 
     // variable_declaration := "var" IDENTIFIER ( "=" expression )? ";"
-    variable_declaration expect_variable_declaration()
+    std::expected<variable_declaration,std::string> parse_variable_declaration()
     {
       auto var = parse_token(token::var) | format_error("{} before variable name");
-      if(not var) throw_error(var);
+      if(not var) return std::unexpected(var.error());
 
       auto name = parse_token(token::identifier);
-      if(not name) throw_error(name);
+      if(not name) return std::unexpected(name.error());
 
       std::optional<expression> maybe_initializer;
 
       if(match(token::equal))
       {
         auto initializer = parse_expression();
-        if(not initializer) throw_error(initializer);
+        if(not initializer) return std::unexpected(initializer.error());
         maybe_initializer = *initializer;
       }
 
       auto semi = parse_token(';') | format_error("{} after variable declaration");
-      if(not semi) throw_error(semi);
+      if(not semi) return std::unexpected(semi.error());
 
-      return {*name, maybe_initializer};
+      return variable_declaration{*name, maybe_initializer};
     }
 
     // parameters := IDENTIFIER ( "," IDENTIFIER )*
@@ -651,7 +653,9 @@ class parser
       }
       else if(peek().which_kind() == token::var)
       {
-        return expect_variable_declaration();
+        auto var_decl = parse_variable_declaration();
+        if(not var_decl) throw_error(var_decl);
+        return *var_decl;
       }
 
       return expect_statement();
