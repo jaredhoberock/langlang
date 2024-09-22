@@ -532,7 +532,9 @@ class parser
 
       while(peek().which_kind() != token::right_brace)
       {
-        stmts.push_back(expect_declaration());
+        auto decl = parse_declaration();
+        if(not decl) throw_error(decl);
+        stmts.push_back(*decl);
       }
 
       auto rbrace = parse_token('}') | format_error("{} after block");
@@ -654,19 +656,15 @@ class parser
     }
 
     // declaration := function_declaration | variable_declaration | statement
-    statement expect_declaration()
+    std::expected<statement,std::string> parse_declaration()
     {
       if(peek().which_kind() == token::fun)
       {
-        auto fun_decl = parse_function_declaration();
-        if(not fun_decl) throw_error(fun_decl);
-        return *fun_decl;
+        return parse_function_declaration();
       }
       else if(peek().which_kind() == token::var)
       {
-        auto var_decl = parse_variable_declaration();
-        if(not var_decl) throw_error(var_decl);
-        return *var_decl;
+        return parse_variable_declaration();
       }
 
       return expect_statement();
@@ -679,7 +677,9 @@ class parser
 
       while(peek().which_kind() != token::eof)
       {
-        statements.push_back(expect_declaration());
+        auto decl = parse_declaration();
+        if(not decl) throw_error(decl);
+        statements.push_back(*decl);
       }
 
       // consume eof
