@@ -631,26 +631,26 @@ class parser
     }
 
     // function_declaration := "fun" IDENTIFIER "(" parameters? ")" block_statement
-    function_declaration expect_function_declaration()
+    std::expected<function_declaration,std::string> parse_function_declaration()
     {
       auto fun = parse_token(token::fun) | format_error("{} before function name");
-      if(not fun) throw_error(fun);
+      if(not fun) return std::unexpected(fun.error());
 
       auto name = parse_token(token::identifier);
-      if(not name) throw_error(name);
+      if(not name) return std::unexpected(name.error());
 
       auto lparen = parse_token('(') | format_error("{} before function parameters");
-      if(not lparen) throw_error(lparen);
+      if(not lparen) return std::unexpected(lparen.error());
 
       auto parameters = parse_parameters();
-      if(not parameters) throw_error(parameters);
+      if(not parameters) return std::unexpected(parameters.error());
 
       auto rparen = parse_token(')') | format_error("{} after function parameters");
-      if(not rparen) throw_error(rparen);
+      if(not rparen) return std::unexpected(rparen.error());
 
       block_statement body = expect_block_statement();
 
-      return {*name, *parameters, body};
+      return function_declaration{*name, *parameters, body};
     }
 
     // declaration := function_declaration | variable_declaration | statement
@@ -658,7 +658,9 @@ class parser
     {
       if(peek().which_kind() == token::fun)
       {
-        return expect_function_declaration();
+        auto fun_decl = parse_function_declaration();
+        if(not fun_decl) throw_error(fun_decl);
+        return *fun_decl;
       }
       else if(peek().which_kind() == token::var)
       {
