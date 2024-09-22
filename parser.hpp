@@ -402,19 +402,19 @@ class parser
     }
 
     // if_statement := "if" "(" expression ")" statement ( "else" statement )?
-    if_statement expect_if_statement()
+    std::expected<if_statement,std::string> parse_if_statement()
     {
       auto if_ = parse_token(token::if_) | format_error("{} before condition");
-      if(not if_) throw_error(if_);
+      if(not if_) return std::unexpected(if_.error());
 
       auto lparen = parse_token('(') | format_error("{} after 'if'");
-      if(not lparen) throw_error(lparen);
+      if(not lparen) return std::unexpected(lparen.error());
 
       auto expr = parse_expression();
-      if(not expr) throw_error(expr);
+      if(not expr) return std::unexpected(expr.error());
 
       auto rparen = parse_token(')') | format_error("{} after if condition");
-      if(not rparen) throw_error(rparen);
+      if(not rparen) return std::unexpected(rparen.error());
 
       statement then_branch = expect_statement();
 
@@ -425,7 +425,7 @@ class parser
         else_branch = expect_statement();
       }
 
-      return {*expr, then_branch, else_branch};
+      return if_statement{*expr, then_branch, else_branch};
     }
 
     // return_statement := "return" expression? ";"
@@ -554,7 +554,9 @@ class parser
       }
       else if(peek().which_kind() == token::if_)
       {
-        return expect_if_statement();
+        auto if_ = parse_if_statement();
+        if(not if_) throw_error(if_.error());
+        return *if_;
       }
       else if(peek().which_kind() == token::return_)
       {
