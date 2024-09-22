@@ -5,9 +5,33 @@
 #include <algorithm>
 #include <array>
 #include <concepts>
+#include <expected>
 #include <fmt/core.h>
 #include <optional>
 #include <vector>
+
+
+struct format_error_t
+{
+  const char* fmt;
+
+  constexpr std::string operator()(std::string&& error) const
+  {
+    return std::vformat(fmt, std::make_format_args(error));
+  }
+};
+
+constexpr format_error_t format_error(const char* fmt)
+{
+  return {fmt};
+}
+
+template<class T>
+constexpr auto operator|(std::expected<T,std::string>&& result, format_error_t xfrm)
+{
+  return std::move(result).transform_error(xfrm);
+}
+
 
 class parser
 {
@@ -48,13 +72,13 @@ class parser
       {
         case token::eof:
         {
-          result = fmt::format("{} at end: {}", peek().location(), message);
+          result = fmt::format("{} at end: {}.", peek().location(), message);
           break;
         }
 
         default:
         {
-          result = fmt::format("{} at '{}': {}", peek().location(), peek().lexeme(), message);
+          result = fmt::format("{} at '{}': {}.", peek().location(), peek().lexeme(), message);
           break;
         }
       }
@@ -70,13 +94,13 @@ class parser
       {
         case token::eof:
         {
-          result = fmt::format("{} at end: {}", tok.location(), message);
+          result = fmt::format("{} at end: {}.", tok.location(), message);
           break;
         }
 
         default:
         {
-          result = fmt::format("{} at '{}': {}", tok.location(), tok.lexeme(), message);
+          result = fmt::format("{} at '{}': {}.", tok.location(), tok.lexeme(), message);
           break;
         }
       }
@@ -94,14 +118,30 @@ class parser
       throw_error(peek(), message);
     }
 
-    token expect_token(token::kind k, const char* message)
+    void throw_error(const std::string& message)
+    {
+      throw_error(peek(), message.c_str());
+    }
+
+    template<class T>
+    void throw_error(const std::expected<T,std::string>& result)
+    {
+      throw_error(result.error());
+    }
+
+    std::expected<token,std::string> parse_token(token::kind k)
     {
       if(peek().which_kind() != k)
       {
-        throw_error(fmt::format("Expected '{}' {}", token::to_string(k), message).c_str());
+        return std::unexpected(std::format("Expected '{}'", token::to_string(k)));
       }
 
       return advance();
+    }
+
+    std::expected<token,std::string> parse_token(char c)
+    {
+      return parse_token(token::to_kind(c));
     }
 
     // primary := number | string | "true" | "false" | "nil" | "(" expression ")" | IDENTIFIER
@@ -131,7 +171,8 @@ class parser
       {
         expression expr = expect_expression();
 
-        expect_token(token::right_paren, "after expression.");
+        auto rparen = parse_token(')') | format_error("{} after expression");
+        if(not rparen) throw_error(rparen);
 
         return grouping_expression{expr};
       }
@@ -177,9 +218,10 @@ class parser
       {
         std::vector<expression> arguments = expect_arguments();
 
-        token paren = expect_token(token::right_paren, "after arguments.");
+        auto rparen = parse_token(')') | format_error("{} after arguments");
+        if(not rparen) throw_error(rparen);
 
-        result = call_expression{std::move(result), arguments, paren};
+        result = call_expression{std::move(result), arguments, *rparen};
       }
 
       return result;
@@ -313,7 +355,8 @@ class parser
     {
       expression expr = expect_expression();
 
-      token consumed_tok = expect_token(token::semicolon, "after expression.");
+      auto semi = parse_token(';') | format_error("{} after expression");
+      if(not semi) throw_error(semi);
 
       return {expr};
     }
@@ -321,11 +364,13 @@ class parser
     // print_statement := "print" expression ";"
     print_statement expect_print_statement()
     {
-      expect_token(token::print, "before expression.");
+      auto print = parse_token(token::print) | format_error("{} before expression");
+      if(not print) throw_error(print);
 
       expression expr = expect_expression();
 
-      expect_token(token::semicolon, "after print expression.");
+      auto semi = parse_token(';') | format_error("{} after print expression");
+      if(not semi) throw_error(semi);
 
       return {expr};
     }
@@ -333,13 +378,16 @@ class parser
     // if_statement := "if" "(" expression ")" statement ( "else" statement )?
     if_statement expect_if_statement()
     {
-      expect_token(token::if_, "before condition.");
+      auto if_ = parse_token(token::if_) | format_error("{} before condition");
+      if(not if_) throw_error(if_);
 
-      expect_token(token::left_paren, "after 'if'.");
+      auto lparen = parse_token('(') | format_error("{} after 'if'");
+      if(not lparen) throw_error(lparen);
 
       expression expr = expect_expression();
 
-      expect_token(token::right_paren, "after if condition.");
+      auto rparen = parse_token(')') | format_error("{} after if condition");
+      if(not rparen) throw_error(rparen);
 
       statement then_branch = expect_statement();
 
@@ -356,7 +404,8 @@ class parser
     // return_statement := "return" expression? ";"
     return_statement expect_return_statement()
     {
-      token keyword = expect_token(token::return_, "before expression.");
+      auto ret = parse_token(token::return_) | format_error("{} before expression");
+      if(not ret) throw_error(ret);
 
       std::optional<expression> expr;
 
@@ -365,21 +414,25 @@ class parser
         expr = expect_expression();
       }
 
-      expect_token(token::semicolon, "after return value.");
+      auto semi = parse_token(';') | format_error("{} after return value");
+      if(not semi) throw_error(semi);
 
-      return {keyword, expr};
+      return {*ret, expr};
     }
 
     // while_statement := "while" "(" expression ")" statement
     while_statement expect_while_statement()
     {
-      expect_token(token::while_, "before condition.");
+      auto while_ = parse_token(token::while_) | format_error("{} before condition");
+      if(not while_) throw_error(while_);
 
-      expect_token(token::left_paren, "after 'while'.");
+      auto lparen = parse_token('(') | format_error("{} after 'while'.");
+      if(not lparen) throw_error(lparen);
 
       expression expr = expect_expression();
 
-      expect_token(token::right_paren, "after while condition.");
+      auto rparen = parse_token(')') | format_error("{} after while condition.");
+      if(not rparen) throw_error(rparen);
 
       statement body = expect_statement();
 
@@ -389,9 +442,11 @@ class parser
     // for_statement := "for" "(" ( variable_declaration | expression_statement ) expression? ";" expression? ")" statement
     for_statement expect_for_statement()
     {
-      expect_token(token::for_, "before loop.");
+      auto for_ = parse_token(token::for_) | format_error("{} before loop.");
+      if(not for_) throw_error(for_);
 
-      expect_token(token::left_paren, "after 'for'.");
+      auto lparen = parse_token('(') | format_error("{} after 'for'");
+      if(not lparen) throw_error(lparen);
 
       std::optional<statement> initializer;
       if(not match(token::semicolon))
@@ -412,7 +467,8 @@ class parser
         condition = expect_expression();
       }
 
-      expect_token(token::semicolon, "after for loop condition.");
+      auto semi = parse_token(';') | format_error("{} after for loop condition");
+      if(not semi) throw_error(semi);
 
       std::optional<expression> increment;
       if(not match(token::right_paren))
@@ -420,7 +476,8 @@ class parser
         increment = expect_expression();
       }
 
-      expect_token(token::right_paren, "after for loop increment.");
+      auto rparen = parse_token(')') | format_error("{} after for loop increment");
+      if(not rparen) throw_error(rparen);
 
       statement body = expect_statement();
 
@@ -430,7 +487,8 @@ class parser
     // block_statement := "{" declaration* "}"
     block_statement expect_block_statement()
     {
-      expect_token(token::left_brace, "before block.");
+      auto lbrace = parse_token('{') | format_error("{} before block");
+      if(not lbrace) throw_error(lbrace);
 
       std::vector<statement> stmts;
 
@@ -439,7 +497,8 @@ class parser
         stmts.push_back(expect_declaration());
       }
 
-      expect_token(token::right_brace, "after block.");
+      auto rbrace = parse_token('}') | format_error("{} after block");
+      if(not rbrace) throw_error(rbrace);
 
       return {stmts};
     }
@@ -478,9 +537,11 @@ class parser
     // variable_declaration := "var" IDENTIFIER ( "=" expression )? ";"
     variable_declaration expect_variable_declaration()
     {
-      expect_token(token::var, "before variable name.");
+      auto var = parse_token(token::var) | format_error("{} before variable name");
+      if(not var) throw_error(var);
 
-      token name = expect_token(token::identifier, ".");
+      auto name = parse_token(token::identifier);
+      if(not name) throw_error(name);
 
       std::optional<expression> initializer;
 
@@ -489,9 +550,10 @@ class parser
         initializer = expect_expression();
       }
 
-      expect_token(token::semicolon, "after variable declaration.");
+      auto semi = parse_token(';') | format_error("{} after variable declaration");
+      if(not semi) throw_error(semi);
 
-      return {name, initializer};
+      return {*name, initializer};
     }
 
     // parameters := IDENTIFIER ( "," IDENTIFIER )*
@@ -508,7 +570,9 @@ class parser
 
         do
         {
-          result.push_back(expect_token(token::identifier, "in function parameter list."));
+          auto id = parse_token(token::identifier) | format_error("{} in function parameter list");
+          if(not id) throw_error(id);
+          result.push_back(*id);
         }
         while(match(token::comma));
       }
@@ -519,19 +583,23 @@ class parser
     // function_declaration := "fun" IDENTIFIER "(" parameters? ")" block_statement
     function_declaration expect_function_declaration()
     {
-      expect_token(token::fun, "before function name.");
+      auto fun = parse_token(token::fun) | format_error("{} before function name");
+      if(not fun) throw_error(fun);
 
-      token name = expect_token(token::identifier, ".");
+      auto name = parse_token(token::identifier);
+      if(not name) throw_error(name);
 
-      expect_token(token::left_paren, "before function parameters.");
+      auto lparen = parse_token('(') | format_error("{} before function parameters");
+      if(not lparen) throw_error(lparen);
 
       std::vector<token> parameters = expect_parameters();
 
-      expect_token(token::right_paren, "after function parameters.");
+      auto rparen = parse_token(')') | format_error("{} after function parameters");
+      if(not rparen) throw_error(rparen);
 
       block_statement body = expect_block_statement();
 
-      return {name, parameters, body};
+      return {*name, parameters, body};
     }
 
     // declaration := function_declaration | variable_declaration | statement
@@ -560,7 +628,8 @@ class parser
       }
 
       // consume eof
-      expect_token(token::eof, ".");
+      auto eof = parse_token(token::eof);
+      if(not eof) throw_error(eof);
 
       return {statements};
     }
