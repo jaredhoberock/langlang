@@ -607,7 +607,7 @@ class parser
     }
 
     // parameters := IDENTIFIER ( "," IDENTIFIER )*
-    std::vector<token> expect_parameters()
+    std::expected<std::vector<token>,std::string> parse_parameters()
     {
       std::vector<token> result;
 
@@ -615,13 +615,13 @@ class parser
       {
         if(result.size() == 255)
         {
-          throw_error("Can't have more than 255 parameters.");
+          return std::unexpected("Can't have more than 255 parameters");
         }
 
         do
         {
           auto id = parse_token(token::identifier) | format_error("{} in function parameter list");
-          if(not id) throw_error(id);
+          if(not id) return std::unexpected(id.error());
           result.push_back(*id);
         }
         while(match(token::comma));
@@ -642,14 +642,15 @@ class parser
       auto lparen = parse_token('(') | format_error("{} before function parameters");
       if(not lparen) throw_error(lparen);
 
-      std::vector<token> parameters = expect_parameters();
+      auto parameters = parse_parameters();
+      if(not parameters) throw_error(parameters);
 
       auto rparen = parse_token(')') | format_error("{} after function parameters");
       if(not rparen) throw_error(rparen);
 
       block_statement body = expect_block_statement();
 
-      return {*name, parameters, body};
+      return {*name, *parameters, body};
     }
 
     // declaration := function_declaration | variable_declaration | statement
