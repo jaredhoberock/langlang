@@ -523,24 +523,24 @@ class parser
     }
 
     // block_statement := "{" declaration* "}"
-    block_statement expect_block_statement()
+    std::expected<block_statement,std::string> parse_block_statement()
     {
       auto lbrace = parse_token('{') | format_error("{} before block");
-      if(not lbrace) throw_error(lbrace);
+      if(not lbrace) return std::unexpected(lbrace.error());
 
       std::vector<statement> stmts;
 
       while(peek().which_kind() != token::right_brace)
       {
         auto decl = parse_declaration();
-        if(not decl) throw_error(decl);
+        if(not decl) return std::unexpected(decl.error());
         stmts.push_back(*decl);
       }
 
       auto rbrace = parse_token('}') | format_error("{} after block");
-      if(not rbrace) throw_error(rbrace);
+      if(not rbrace) return std::unexpected(rbrace.error());
 
-      return {stmts};
+      return block_statement{stmts};
     }
 
     // statement := expression_statement | print_statement | if_statement | return_statement | while_statement | for_statement | "{" declaration* "}"
@@ -576,7 +576,9 @@ class parser
       }
       else if(peek().which_kind() == token::left_brace)
       {
-        return expect_block_statement();
+        auto block = parse_block_statement();
+        if(not block) throw_error(block);
+        return *block;
       }
 
       auto stmt = parse_expression_statement();
@@ -650,9 +652,10 @@ class parser
       auto rparen = parse_token(')') | format_error("{} after function parameters");
       if(not rparen) return std::unexpected(rparen.error());
 
-      block_statement body = expect_block_statement();
+      auto body = parse_block_statement();
+      if(not body) return std::unexpected(body.error());
 
-      return function_declaration{*name, *parameters, body};
+      return function_declaration{*name, *parameters, *body};
     }
 
     // declaration := function_declaration | variable_declaration | statement
