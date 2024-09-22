@@ -450,23 +450,23 @@ class parser
     }
 
     // while_statement := "while" "(" expression ")" statement
-    while_statement expect_while_statement()
+    std::expected<while_statement,std::string> parse_while_statement()
     {
       auto while_ = parse_token(token::while_) | format_error("{} before condition");
-      if(not while_) throw_error(while_);
+      if(not while_) return std::unexpected(while_.error());
 
       auto lparen = parse_token('(') | format_error("{} after 'while'.");
-      if(not lparen) throw_error(lparen);
+      if(not lparen) return std::unexpected(lparen.error());
 
       auto expr = parse_expression();
-      if(not expr) throw_error(expr);
+      if(not expr) return std::unexpected(expr.error());
 
       auto rparen = parse_token(')') | format_error("{} after while condition.");
-      if(not rparen) throw_error(rparen);
+      if(not rparen) return std::unexpected(rparen.error());
 
       statement body = expect_statement();
 
-      return {*expr, body};
+      return while_statement{*expr, body};
     }
 
     // for_statement := "for" "(" ( variable_declaration | expression_statement ) expression? ";" expression? ")" statement
@@ -562,7 +562,9 @@ class parser
       }
       else if(peek().which_kind() == token::while_)
       {
-        return expect_while_statement();
+        auto while_ = parse_while_statement();
+        if(not while_) throw_error(while_);
+        return *while_;
       }
       else if(peek().which_kind() == token::for_)
       {
