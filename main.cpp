@@ -11,31 +11,74 @@ void usage()
 
 bool interpret(interpreter& interp, const std::string& source)
 {
-  bool result = true;
+  parser p{token_stream{source}};
 
-  try
+  return p.parse().transform([&](program&& prog)
   {
-    parser p{token_stream{source}};
-
-    program prog = p.parse();
-
     try
     {
       interp(prog);
     }
-    catch(std::runtime_error& e)
+    catch(std::runtime_error& error)
     {
-      std::cerr << "Runtime error: " << e.what() << std::endl;
-      result = false;
+      std::cerr << "Runtime error: " << error.what() << std::endl;
+      return false;
     }
-  }
-  catch(std::runtime_error& e)
-  {
-    std::cerr << "Syntax error: " << e.what() << std::endl;
-    result = false;
-  }
 
-  return result;
+    return true;
+  })
+  .transform_error([](std::string&& error)
+  {
+    auto message = std::format("Syntax error: {}", error);
+    std::cerr << message << std::endl;
+    return message;
+  })
+  .has_value();
+
+//  bool result = true;
+//
+//  try
+//  {
+//    parser p{token_stream{source}};
+//
+//    auto prog = p.parse()
+//      .transform([](program&& prog)
+//      {
+//        try
+//        {
+//          interp(prog);
+//          return true;
+//        }
+//        catch(std::runtime_error& e)
+//        {
+//          std::cerr << "Runtime error: " << e.what() << std::endl;
+//          return false;
+//        }
+//      })
+//      .or_else([](std::string&& error)
+//      {
+//        std::cerr << "Syntax error: " << error.what() << std::endl;
+//        return false;
+//      })
+//    ;
+//
+//    try
+//    {
+//      interp(prog);
+//    }
+//    catch(std::runtime_error& e)
+//    {
+//      std::cerr << "Runtime error: " << e.what() << std::endl;
+//      result = false;
+//    }
+//  }
+//  catch(std::runtime_error& e)
+//  {
+//    std::cerr << "Syntax error: " << e.what() << std::endl;
+//    result = false;
+//  }
+//
+//  return result;
 }
 
 

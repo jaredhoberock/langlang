@@ -41,9 +41,17 @@ class parser
         current_(stream_.begin())
     {}
 
-    program parse()
+    std::expected<program,std::string> parse()
     {
-      return expect_program();
+      return parse_program().transform_error([&](std::string&& error)
+      {
+        if(peek().which_kind() == token::eof)
+        {
+          return std::format("{} at end: {}.", peek().location(), error);
+        }
+        
+        return std::format("{} at '{}': {}.", peek().location(), peek().lexeme(), error);
+      });
     }
 
   private:
@@ -62,71 +70,6 @@ class parser
       }
 
       return result;
-    }
-
-    std::string error_message(const char* message)
-    {
-      std::string result;
-
-      switch(peek().which_kind())
-      {
-        case token::eof:
-        {
-          result = fmt::format("{} at end: {}.", peek().location(), message);
-          break;
-        }
-
-        default:
-        {
-          result = fmt::format("{} at '{}': {}.", peek().location(), peek().lexeme(), message);
-          break;
-        }
-      }
-
-      return result;
-    }
-
-    std::string error_message(token tok, const char* message)
-    {
-      std::string result;
-
-      switch(tok.which_kind())
-      {
-        case token::eof:
-        {
-          result = fmt::format("{} at end: {}.", tok.location(), message);
-          break;
-        }
-
-        default:
-        {
-          result = fmt::format("{} at '{}': {}.", tok.location(), tok.lexeme(), message);
-          break;
-        }
-      }
-
-      return result;
-    }
-
-    void throw_error(token tok, const char* message)
-    {
-      throw std::runtime_error(error_message(tok, message));
-    }
-
-    void throw_error(const char* message)
-    {
-      throw_error(peek(), message);
-    }
-
-    void throw_error(const std::string& message)
-    {
-      throw_error(peek(), message.c_str());
-    }
-
-    template<class T>
-    void throw_error(const std::expected<T,std::string>& result)
-    {
-      throw_error(result.error());
     }
 
     std::expected<token,std::string> parse_token(token::kind k)
@@ -170,10 +113,10 @@ class parser
       else if(match(token::left_paren))
       {
         auto expr = parse_expression();
-        if(not expr) throw_error(expr);
+        if(not expr) return std::unexpected(expr.error());
 
         auto rparen = parse_token(')') | format_error("{} after expression");
-        if(not rparen) throw_error(rparen);
+        if(not rparen) return std::unexpected(rparen.error());
 
         return grouping_expression{*expr};
       }
@@ -356,7 +299,7 @@ class parser
       {
         if(not std::holds_alternative<variable>(*result))
         {
-          throw_error(*eq, "Invalid assignment target.");
+          return std::unexpected("Invalid assignment target");
         }
 
         auto rhs = parse_assignment();
@@ -667,22 +610,22 @@ class parser
     }
 
     // program := declaration* EOF
-    program expect_program()
+    std::expected<program,std::string> parse_program()
     {
       std::vector<statement> statements;
 
       while(peek().which_kind() != token::eof)
       {
         auto decl = parse_declaration();
-        if(not decl) throw_error(decl);
+        if(not decl) return std::unexpected(decl.error());
         statements.push_back(*decl);
       }
 
       // consume eof
       auto eof = parse_token(token::eof);
-      if(not eof) throw_error(eof);
+      if(not eof) return std::unexpected(eof.error());
 
-      return {statements};
+      return program{statements};
     }
 
     std::optional<token> match(token::kind kind)
