@@ -34,51 +34,6 @@ bool interpret(interpreter& interp, const std::string& source)
     return message;
   })
   .has_value();
-
-//  bool result = true;
-//
-//  try
-//  {
-//    parser p{token_stream{source}};
-//
-//    auto prog = p.parse()
-//      .transform([](program&& prog)
-//      {
-//        try
-//        {
-//          interp(prog);
-//          return true;
-//        }
-//        catch(std::runtime_error& e)
-//        {
-//          std::cerr << "Runtime error: " << e.what() << std::endl;
-//          return false;
-//        }
-//      })
-//      .or_else([](std::string&& error)
-//      {
-//        std::cerr << "Syntax error: " << error.what() << std::endl;
-//        return false;
-//      })
-//    ;
-//
-//    try
-//    {
-//      interp(prog);
-//    }
-//    catch(std::runtime_error& e)
-//    {
-//      std::cerr << "Runtime error: " << e.what() << std::endl;
-//      result = false;
-//    }
-//  }
-//  catch(std::runtime_error& e)
-//  {
-//    std::cerr << "Syntax error: " << e.what() << std::endl;
-//    result = false;
-//  }
-//
-//  return result;
 }
 
 
