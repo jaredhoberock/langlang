@@ -145,7 +145,7 @@ class parser
     }
 
     // primary := number | string | "true" | "false" | "nil" | "(" expression ")" | IDENTIFIER
-    expression expect_primary()
+    std::expected<expression,std::string> parse_primary()
     {
       if(std::optional n = match(token::number))
       {
@@ -181,10 +181,7 @@ class parser
         return variable{*name};
       }
 
-      throw_error("Expected primary expression.");
-
-      // XXX this sucks
-      return literal{0.0};
+      return std::unexpected("Expected primary expression");
     }
 
     // arguments := expression ( "," expression )*
@@ -212,7 +209,8 @@ class parser
     // call := primary ( "(" arguments? ")" )*
     expression expect_call()
     {
-      expression result = expect_primary();
+      auto result = parse_primary();
+      if(not result) throw_error(result);
 
       if(match(token::left_paren))
       {
@@ -221,10 +219,10 @@ class parser
         auto rparen = parse_token(')') | format_error("{} after arguments");
         if(not rparen) throw_error(rparen);
 
-        result = call_expression{std::move(result), arguments, *rparen};
+        result = call_expression{std::move(*result), arguments, *rparen};
       }
 
-      return result;
+      return *result;
     }
 
     // unary := ( "!" | "-" ) unary | call
