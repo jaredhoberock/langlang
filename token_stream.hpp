@@ -3,7 +3,9 @@
 #include <cassert>
 #include <cctype>
 #include <cstdlib>
+#include <fmt/format.h>
 #include <fstream>
+#include <format>
 #include <iostream>
 #include <map>
 #include <optional>
@@ -25,6 +27,26 @@ class token
       right_paren, semicolon, slash, star, string, super, this_,
       true_, var, while_,
     };
+
+    static constexpr kind to_kind(char c)
+    {
+      if(c == '!') return bang;
+      if(c == ',') return comma;
+      if(c == '.') return dot;
+      if(c == '=') return equal;
+      if(c == '>') return greater;
+      if(c == '{') return left_brace;
+      if(c == '(') return left_paren;
+      if(c == '<') return less;
+      if(c == '-') return minus;
+      if(c == '+') return plus;
+      if(c == '}') return right_brace;
+      if(c == ')') return right_paren;
+      if(c == ';') return semicolon;
+      if(c == '/') return slash;
+      if(c == '*') return star;
+      return error;
+    }
 
     static const char* to_string(kind k)
     {
@@ -441,5 +463,39 @@ class token_stream
 
     std::string_view source_;
     source_location loc_;
+};
+
+
+template<>
+struct fmt::formatter<token>
+{
+  template<class ParseContext>
+  constexpr auto parse(ParseContext& ctx) const
+  {
+    return ctx.begin();
+  }
+
+  template<class FormatContext>
+  constexpr auto format(const token& t, FormatContext& ctx) const
+  {
+    return fmt::format_to(ctx.out(), "{} {} {}", t.which_kind(), t.lexeme(), t.location());
+  }
+};
+
+
+template<>
+struct std::formatter<token>
+{
+  template<class ParseContext>
+  constexpr auto parse(ParseContext& ctx) const
+  {
+    return ctx.begin();
+  }
+
+  template<class FormatContext>
+  constexpr auto format(const token& t, FormatContext& ctx) const
+  {
+    return std::format_to(ctx.out(), "{} {} {}", t.which_kind(), t.lexeme(), t.location());
+  }
 };
 
