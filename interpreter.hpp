@@ -453,6 +453,15 @@ struct interpreter
     }, stmt.expr);
   }
 
+  void operator()(environment& env, const assert_statement& stmt)
+  {
+    value val = self(env, stmt.expr);
+    if(not to_bool(val))
+    {
+      throw std::runtime_error("assert failed");
+    }
+  }
+
   void operator()(environment& env, const print_statement& stmt)
   {
     value val = self(env, stmt.expr);

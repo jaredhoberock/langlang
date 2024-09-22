@@ -153,6 +153,21 @@ class parser
       return result;
     }
 
+    // assert := "assert" expression ";"
+    std::expected<assert_statement,std::string> parse_assert_statement()
+    {
+      auto assert = parse_token(token::assert) | format_error("{} before expression");
+      if(not assert) return std::unexpected(assert.error());
+
+      auto expr = parse_expression();
+      if(not expr) return std::unexpected(expr.error());
+
+      auto semi = parse_token(';') | format_error("{} after assert expression");
+      if(not semi) return std::unexpected(semi.error());
+
+      return assert_statement{*expr};
+    }
+
     // call := primary ( "(" arguments? ")" )*
     std::expected<expression,std::string> parse_call()
     {
@@ -491,9 +506,13 @@ class parser
       return block_statement{stmts};
     }
 
-    // statement := expression_statement | print_statement | if_statement | return_statement | while_statement | for_statement | "{" declaration* "}"
+    // statement := assert_statement | expression_statement | print_statement | if_statement | return_statement | while_statement | for_statement | "{" declaration* "}"
     std::expected<statement,std::string> parse_statement()
     {
+      if(peek().which_kind() == token::assert)
+      {
+        return parse_assert_statement();
+      }
       if(peek().which_kind() == token::print)
       {
         return parse_print_statement();

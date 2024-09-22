@@ -20,12 +20,12 @@ class token
   public:
     enum kind
     {
-      and_, bang, bang_equal, class_, comma, dot, else_, eof, error,
-      equal, equal_equal, false_, for_, fun, greater, greater_equal,
-      identifier, if_, left_brace, left_paren, less, less_equal,
-      minus, nil, number, or_, plus, print, return_, right_brace,
-      right_paren, semicolon, slash, star, string, super, this_,
-      true_, var, while_,
+      and_, assert, bang, bang_equal, class_, comma, dot, else_, eof,
+      error, equal, equal_equal, false_, for_, fun, greater,
+      greater_equal, identifier, if_, left_brace, left_paren, less,
+      less_equal, minus, nil, number, or_, plus, print, return_,
+      right_brace, right_paren, semicolon, slash, star, string, super,
+      this_, true_, var, while_,
     };
 
     static constexpr kind to_kind(char c)
@@ -53,6 +53,7 @@ class token
       switch(k)
       {
         case(and_): return "and";
+        case(assert): return "assert";
         case(bang): return "!";
         case(bang_equal): return "!=";
         case(class_): return "class";
@@ -190,6 +191,7 @@ class token
 
 const std::map<std::string,token::kind> token::keywords_ = {
   {"and", and_},
+  {"assert", assert},
   {"class", class_},
   {"else", else_},
   {"false", false_},

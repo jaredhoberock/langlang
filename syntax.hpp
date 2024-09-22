@@ -57,6 +57,11 @@ struct call_expression
   token closing_paren;
 };
 
+struct assert_statement
+{
+  expression expr;
+};
+
 struct return_statement
 {
   token keyword;
@@ -75,7 +80,7 @@ struct variable_declaration
 };
 
 using statement = recursive_variant<
-  return_statement, print_statement, variable_declaration, 
+  assert_statement, return_statement, print_statement, variable_declaration, 
   struct expression_statement, struct block_statement,
   struct function_declaration, struct if_statement,
   struct while_statement, struct for_statement
