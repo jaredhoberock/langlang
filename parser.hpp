@@ -211,23 +211,23 @@ class parser
     }
 
     // call := primary ( "(" arguments? ")" )*
-    expression expect_call()
+    std::expected<expression,std::string> parse_call()
     {
       auto result = parse_primary();
-      if(not result) throw_error(result);
+      if(not result) return result;
 
       if(match(token::left_paren))
       {
         auto args = parse_arguments();
-        if(not args) throw_error(args);
+        if(not args) return std::unexpected(args.error());
 
         auto rparen = parse_token(')') | format_error("{} after arguments");
-        if(not rparen) throw_error(rparen);
+        if(not rparen) return std::unexpected(rparen.error());
 
         result = call_expression{std::move(*result), *args, *rparen};
       }
 
-      return *result;
+      return result;
     }
 
     // unary := ( "!" | "-" ) unary | call
@@ -238,7 +238,9 @@ class parser
         return unary_expression{*op, expect_unary()};
       }
 
-      return expect_call();
+      auto call = parse_call();
+      if(not call) throw_error(call);
+      return *call;
     }
 
     // factor := unary ( ( "/" | "*" ) ) unary )*
