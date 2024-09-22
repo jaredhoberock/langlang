@@ -416,16 +416,19 @@ class parser
       auto rparen = parse_token(')') | format_error("{} after if condition");
       if(not rparen) return std::unexpected(rparen.error());
 
-      statement then_branch = expect_statement();
+      auto then_branch = parse_statement();
+      if(not then_branch) return std::unexpected(then_branch.error());
 
-      std::optional<statement> else_branch;
+      std::optional<statement> maybe_else_branch;
 
       if(match(token::else_))
       {
-        else_branch = expect_statement();
+        auto else_branch = parse_statement();
+        if(not else_branch) return std::unexpected(else_branch.error());
+        maybe_else_branch = *else_branch;
       }
 
-      return if_statement{*expr, then_branch, else_branch};
+      return if_statement{*expr, *then_branch, maybe_else_branch};
     }
 
     // return_statement := "return" expression? ";"
@@ -464,9 +467,10 @@ class parser
       auto rparen = parse_token(')') | format_error("{} after while condition.");
       if(not rparen) return std::unexpected(rparen.error());
 
-      statement body = expect_statement();
+      auto body = parse_statement();
+      if(not body) return std::unexpected(body.error());
 
-      return while_statement{*expr, body};
+      return while_statement{*expr, *body};
     }
 
     // for_statement := "for" "(" ( variable_declaration | expression_statement ) expression? ";" expression? ")" statement
@@ -517,9 +521,10 @@ class parser
       auto rparen = parse_token(')') | format_error("{} after for loop increment");
       if(not rparen) return std::unexpected(rparen.error());
 
-      statement body = expect_statement();
+      auto body = parse_statement();
+      if(not body) return std::unexpected(body.error());
 
-      return for_statement{maybe_init, maybe_condition, maybe_increment, body};
+      return for_statement{maybe_init, maybe_condition, maybe_increment, *body};
     }
 
     // block_statement := "{" declaration* "}"
@@ -544,48 +549,34 @@ class parser
     }
 
     // statement := expression_statement | print_statement | if_statement | return_statement | while_statement | for_statement | "{" declaration* "}"
-    statement expect_statement()
+    std::expected<statement,std::string> parse_statement()
     {
       if(peek().which_kind() == token::print)
       {
-        auto print = parse_print_statement();
-        if(not print) throw_error(print);
-        return *print;
+        return parse_print_statement();
       }
       else if(peek().which_kind() == token::if_)
       {
-        auto if_ = parse_if_statement();
-        if(not if_) throw_error(if_.error());
-        return *if_;
+        return parse_if_statement();
       }
       else if(peek().which_kind() == token::return_)
       {
-        auto ret = parse_return_statement();
-        if(not ret) throw_error(ret);
-        return *ret;
+        return parse_return_statement();
       }
       else if(peek().which_kind() == token::while_)
       {
-        auto while_ = parse_while_statement();
-        if(not while_) throw_error(while_);
-        return *while_;
+        return parse_while_statement();
       }
       else if(peek().which_kind() == token::for_)
       {
-        auto for_ = parse_for_statement();
-        if(not for_) throw_error(for_);
-        return *for_;
+        return parse_for_statement();
       }
       else if(peek().which_kind() == token::left_brace)
       {
-        auto block = parse_block_statement();
-        if(not block) throw_error(block);
-        return *block;
+        return  parse_block_statement();
       }
 
-      auto stmt = parse_expression_statement();
-      if(not stmt) throw_error(stmt);
-      return *stmt;
+      return parse_expression_statement();
     }
 
     // variable_declaration := "var" IDENTIFIER ( "=" expression )? ";"
@@ -672,7 +663,7 @@ class parser
         return parse_variable_declaration();
       }
 
-      return expect_statement();
+      return parse_statement();
     }
 
     // program := declaration* EOF
