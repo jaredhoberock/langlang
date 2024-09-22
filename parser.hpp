@@ -330,40 +330,41 @@ class parser
     }
 
     // logical_or := logical_and ( "or" logical_and )*
-    expression expect_logical_or()
+    std::expected<expression,std::string> parse_logical_or()
     {
       auto result = parse_logical_and();
-      if(not result) throw_error(result);
+      if(not result) return result;
 
       if(std::optional or_ = match(token::or_))
       {
         auto right = parse_logical_and();
-        if(not right) throw_error(right);
+        if(not right) return right;
 
         result = logical_expression{*result, *or_, *right};
       }
 
-      return *result;
+      return result;
     }
 
     // assignment := IDENTIFIER "=" assignment | logical_or
     expression expect_assignment()
     {
-      expression result = expect_logical_or();
+      auto result = parse_logical_or();
+      if(not result) throw_error(result);
 
       if(std::optional eq = match(token::equal))
       {
-        if(not std::holds_alternative<variable>(result))
+        if(not std::holds_alternative<variable>(*result))
         {
           throw_error(*eq, "Invalid assignment target.");
         }
 
         expression rhs = expect_assignment();
 
-        result = assignment_expression{get<variable>(result), rhs};
+        result = assignment_expression{get<variable>(*result), rhs};
       }
 
-      return result;
+      return *result;
     }
 
     // expression := assignment
