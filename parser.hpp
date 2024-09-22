@@ -231,31 +231,34 @@ class parser
     }
 
     // unary := ( "!" | "-" ) unary | call
-    expression expect_unary()
+    std::expected<expression,std::string> parse_unary()
     {
       if(std::optional op = match_any(token::bang, token::minus))
       {
-        return unary_expression{*op, expect_unary()};
+        return parse_unary().transform([&](expression&& result)
+        {
+          return unary_expression{*op, std::move(result)};
+        });
       }
 
-      auto call = parse_call();
-      if(not call) throw_error(call);
-      return *call;
+      return parse_call();
     }
 
     // factor := unary ( ( "/" | "*" ) ) unary )*
     expression expect_factor()
     {
-      expression result = expect_unary();
+      auto result = parse_unary();
+      if(not result) throw_error(result);
 
       while(std::optional op = match_any(token::slash, token::star))
       {
-        expression right = expect_unary();
+        auto right = parse_unary();
+        if(not right) throw_error(right);
 
-        result = binary_expression{result, *op, right};
+        result = binary_expression{*result, *op, *right};
       }
 
-      return result;
+      return *result;
     }
 
     // term := factor ( ( "-" | "+" ) factor )*
