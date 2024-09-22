@@ -279,35 +279,37 @@ class parser
     }
 
     // comparison := term ( ( ">" | ">=" | "<=" ) term )*
-    expression expect_comparison()
+    std::expected<expression,std::string> parse_comparison()
     {
       auto result = parse_term(); 
-      if(not result) throw_error(result);
+      if(not result) return result;
 
       while(std::optional op = match_any(token::greater, token::greater_equal, token::less, token::less_equal))
       {
         auto right = parse_term();
+        if(not right) return right;
+
+        result = binary_expression{*result, *op, *right};
+      }
+
+      return result;
+    }
+
+    // equality := comparison ( ( "!=" | "==" ) comparison )*
+    expression expect_equality()
+    {
+      auto result = parse_comparison();
+      if(not result) throw_error(result);
+
+      while(std::optional op = match_any(token::bang_equal, token::equal_equal))
+      {
+        auto right = parse_comparison();
         if(not right) throw_error(right);
 
         result = binary_expression{*result, *op, *right};
       }
 
       return *result;
-    }
-
-    // equality := comparison ( ( "!=" | "==" ) comparison )*
-    expression expect_equality()
-    {
-      expression result = expect_comparison();
-
-      while(std::optional op = match_any(token::bang_equal, token::equal_equal))
-      {
-        expression right = expect_comparison();
-
-        result = binary_expression{result, *op, right};
-      }
-
-      return result;
     }
 
     // logical_and := equality ( "and" equality )*
