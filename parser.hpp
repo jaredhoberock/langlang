@@ -470,13 +470,13 @@ class parser
     }
 
     // for_statement := "for" "(" ( variable_declaration | expression_statement ) expression? ";" expression? ")" statement
-    for_statement expect_for_statement()
+    std::expected<for_statement,std::string> parse_for_statement()
     {
       auto for_ = parse_token(token::for_) | format_error("{} before loop.");
-      if(not for_) throw_error(for_);
+      if(not for_) return std::unexpected(for_.error());
 
       auto lparen = parse_token('(') | format_error("{} after 'for'");
-      if(not lparen) throw_error(lparen);
+      if(not lparen) return std::unexpected(lparen.error());
 
       std::optional<statement> maybe_init;
       if(not match(token::semicolon))
@@ -484,13 +484,13 @@ class parser
         if(peek().which_kind() == token::var)
         {
           auto init = parse_variable_declaration();
-          if(not init) throw_error(init);
+          if(not init) return std::unexpected(init.error());
           maybe_init = *init;
         }
         else
         {
           auto init = parse_expression_statement();
-          if(not init) throw_error(init);
+          if(not init) return std::unexpected(init.error());
           maybe_init = *init;
         }
       }
@@ -499,27 +499,27 @@ class parser
       if(not match(token::semicolon))
       {
         auto condition = parse_expression();
-        if(not condition) throw_error(condition);
+        if(not condition) return std::unexpected(condition.error());
         maybe_condition = *condition;
       }
 
       auto semi = parse_token(';') | format_error("{} after for loop condition");
-      if(not semi) throw_error(semi);
+      if(not semi) return std::unexpected(semi.error());
 
       std::optional<expression> maybe_increment;
       if(not match(token::right_paren))
       {
         auto increment = parse_expression();
-        if(not increment) throw_error(increment);
+        if(not increment) return std::unexpected(increment.error());
         maybe_increment = *increment;
       }
 
       auto rparen = parse_token(')') | format_error("{} after for loop increment");
-      if(not rparen) throw_error(rparen);
+      if(not rparen) return std::unexpected(rparen.error());
 
       statement body = expect_statement();
 
-      return {maybe_init, maybe_condition, maybe_increment, body};
+      return for_statement{maybe_init, maybe_condition, maybe_increment, body};
     }
 
     // block_statement := "{" declaration* "}"
@@ -568,7 +568,9 @@ class parser
       }
       else if(peek().which_kind() == token::for_)
       {
-        return expect_for_statement();
+        auto for_ = parse_for_statement();
+        if(not for_) throw_error(for_);
+        return *for_;
       }
       else if(peek().which_kind() == token::left_brace)
       {
