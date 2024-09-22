@@ -169,12 +169,13 @@ class parser
       }
       else if(match(token::left_paren))
       {
-        expression expr = expect_expression();
+        auto expr = parse_expression();
+        if(not expr) throw_error(expr);
 
         auto rparen = parse_token(')') | format_error("{} after expression");
         if(not rparen) throw_error(rparen);
 
-        return grouping_expression{expr};
+        return grouping_expression{*expr};
       }
       else if(std::optional name = match(token::identifier))
       {
@@ -198,7 +199,9 @@ class parser
 
         do
         {
-          result.push_back(expect_expression());
+          auto expr = parse_expression();
+          if(not expr) throw_error(expr);
+          result.push_back(*expr);
         }
         while(match(token::comma));
       }
@@ -343,7 +346,7 @@ class parser
     }
 
     // expression := assignment
-    expression expect_expression()
+    std::expected<expression,std::string> parse_expression()
     {
       return expect_assignment();
     }
@@ -351,12 +354,13 @@ class parser
     // expression_statement := expression ";"
     expression_statement expect_expression_statement()
     {
-      expression expr = expect_expression();
+      auto expr = parse_expression();
+      if(not expr) throw_error(expr);
 
       auto semi = parse_token(';') | format_error("{} after expression");
       if(not semi) throw_error(semi);
 
-      return {expr};
+      return {*expr};
     }
 
     // print_statement := "print" expression ";"
@@ -365,12 +369,13 @@ class parser
       auto print = parse_token(token::print) | format_error("{} before expression");
       if(not print) throw_error(print);
 
-      expression expr = expect_expression();
+      auto expr = parse_expression();
+      if(not expr) throw_error(expr);
 
       auto semi = parse_token(';') | format_error("{} after print expression");
       if(not semi) throw_error(semi);
 
-      return {expr};
+      return {*expr};
     }
 
     // if_statement := "if" "(" expression ")" statement ( "else" statement )?
@@ -382,7 +387,8 @@ class parser
       auto lparen = parse_token('(') | format_error("{} after 'if'");
       if(not lparen) throw_error(lparen);
 
-      expression expr = expect_expression();
+      auto expr = parse_expression();
+      if(not expr) throw_error(expr);
 
       auto rparen = parse_token(')') | format_error("{} after if condition");
       if(not rparen) throw_error(rparen);
@@ -396,7 +402,7 @@ class parser
         else_branch = expect_statement();
       }
 
-      return {expr, then_branch, else_branch};
+      return {*expr, then_branch, else_branch};
     }
 
     // return_statement := "return" expression? ";"
@@ -405,17 +411,19 @@ class parser
       auto ret = parse_token(token::return_) | format_error("{} before expression");
       if(not ret) throw_error(ret);
 
-      std::optional<expression> expr;
+      std::optional<expression> maybe_expr;
 
       if(peek().which_kind() != token::semicolon)
       {
-        expr = expect_expression();
+        auto expr = parse_expression();
+        if(not expr) throw_error(expr);
+        maybe_expr = *expr;
       }
 
       auto semi = parse_token(';') | format_error("{} after return value");
       if(not semi) throw_error(semi);
 
-      return {*ret, expr};
+      return {*ret, maybe_expr};
     }
 
     // while_statement := "while" "(" expression ")" statement
@@ -427,14 +435,15 @@ class parser
       auto lparen = parse_token('(') | format_error("{} after 'while'.");
       if(not lparen) throw_error(lparen);
 
-      expression expr = expect_expression();
+      auto expr = parse_expression();
+      if(not expr) throw_error(expr);
 
       auto rparen = parse_token(')') | format_error("{} after while condition.");
       if(not rparen) throw_error(rparen);
 
       statement body = expect_statement();
 
-      return {expr, body};
+      return {*expr, body};
     }
 
     // for_statement := "for" "(" ( variable_declaration | expression_statement ) expression? ";" expression? ")" statement
@@ -459,19 +468,23 @@ class parser
         }
       }
 
-      std::optional<expression> condition;
+      std::optional<expression> maybe_condition;
       if(not match(token::semicolon))
       {
-        condition = expect_expression();
+        auto condition = parse_expression();
+        if(not condition) throw_error(condition);
+        maybe_condition = *condition;
       }
 
       auto semi = parse_token(';') | format_error("{} after for loop condition");
       if(not semi) throw_error(semi);
 
-      std::optional<expression> increment;
+      std::optional<expression> maybe_increment;
       if(not match(token::right_paren))
       {
-        increment = expect_expression();
+        auto increment = parse_expression();
+        if(not increment) throw_error(increment);
+        maybe_increment = *increment;
       }
 
       auto rparen = parse_token(')') | format_error("{} after for loop increment");
@@ -479,7 +492,7 @@ class parser
 
       statement body = expect_statement();
 
-      return {initializer, condition, increment, body};
+      return {initializer, maybe_condition, maybe_increment, body};
     }
 
     // block_statement := "{" declaration* "}"
@@ -541,17 +554,19 @@ class parser
       auto name = parse_token(token::identifier);
       if(not name) throw_error(name);
 
-      std::optional<expression> initializer;
+      std::optional<expression> maybe_initializer;
 
       if(match(token::equal))
       {
-        initializer = expect_expression();
+        auto initializer = parse_expression();
+        if(not initializer) throw_error(initializer);
+        maybe_initializer = *initializer;
       }
 
       auto semi = parse_token(';') | format_error("{} after variable declaration");
       if(not semi) throw_error(semi);
 
-      return {*name, initializer};
+      return {*name, maybe_initializer};
     }
 
     // parameters := IDENTIFIER ( "," IDENTIFIER )*
