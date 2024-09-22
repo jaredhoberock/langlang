@@ -313,33 +313,37 @@ class parser
     }
 
     // logical_and := equality ( "and" equality )*
-    expression expect_logical_and()
+    std::expected<expression,std::string> parse_logical_and()
     {
       auto result = parse_equality();
-      if(not result) throw_error(result);
+      if(not result) return result;
 
       if(std::optional and_ = match(token::and_))
       {
         auto right = parse_equality();
-        if(not right) throw_error(right);
+        if(not right) return right;
 
         result = logical_expression{*result, *and_, *right};
       }
 
-      return *result;
+      return result;
     }
 
     // logical_or := logical_and ( "or" logical_and )*
     expression expect_logical_or()
     {
-      expression result = expect_logical_and();
+      auto result = parse_logical_and();
+      if(not result) throw_error(result);
 
       if(std::optional or_ = match(token::or_))
       {
-        result = logical_expression{result, *or_, expect_logical_and()};
+        auto right = parse_logical_and();
+        if(not right) throw_error(right);
+
+        result = logical_expression{*result, *or_, *right};
       }
 
-      return result;
+      return *result;
     }
 
     // assignment := IDENTIFIER "=" assignment | logical_or
