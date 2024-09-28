@@ -5,7 +5,7 @@ LANGLANG_SOURCES = ../interpreter.hpp \
 		   ../parser.hpp \
 		   ../source_location.hpp \
 		   ../syntax.hpp \
-		   ../token_stream.hpp
+		   ../token_range.hpp
 
 TEST_SRCS = 0_hello.lox
 

@@ -1,7 +1,7 @@
 #pragma once
 
 #include "syntax.hpp"
-#include "token_stream.hpp"
+#include "token_range.hpp"
 #include <algorithm>
 #include <array>
 #include <concepts>
@@ -36,9 +36,9 @@ constexpr auto operator|(std::expected<T,std::string>&& result, format_error_t x
 class parser
 {
   public:
-    parser(token_stream stream)
-      : stream_(stream),
-        current_(stream_.begin())
+    parser(token_range tokens)
+      : tokens_(tokens),
+        current_(tokens_.begin())
     {}
 
     std::expected<program,std::string> parse()
@@ -55,6 +55,9 @@ class parser
     }
 
   private:
+    token_range tokens_;
+    token_range::iterator current_;
+
     token peek() const
     {
       return *current_;
@@ -64,13 +67,43 @@ class parser
     {
       token result = *current_;
 
-      if(current_ != stream_.end())
+      if(current_ != tokens_.end())
       {
         ++current_;
       }
 
       return result;
     }
+
+    std::optional<token> match(token::kind kind)
+    {
+      std::optional<token> result;
+
+      if(peek().which_kind() == kind)
+      {
+        result = advance();
+      }
+
+      return result;
+    }
+
+    template<std::same_as<token::kind>... TokenKinds>
+    std::optional<token> match_any(token::kind arg, TokenKinds... args)
+    {
+      std::optional<token> result;
+
+      std::array<token::kind, 1 + sizeof...(args)> kinds{arg, args...};
+
+      bool found = std::find(kinds.begin(), kinds.end(), peek().which_kind()) != kinds.end();
+
+      if(found)
+      {
+        result = advance();
+      }
+
+      return result;
+    }
+
 
     std::expected<token,std::string> parse_token(token::kind k)
     {
@@ -142,7 +175,8 @@ class parser
 
         do
         {
-          auto expr = parse_expression();
+          auto err_fmt_str = result.size() > 0 ? "{} after ',' in argument list"  : "{} after '('";
+          auto expr = parse_expression() | format_error(err_fmt_str);
           if(not expr) return std::unexpected(expr.error());
 
           result.push_back(*expr);
@@ -646,37 +680,5 @@ class parser
 
       return program{statements};
     }
-
-    std::optional<token> match(token::kind kind)
-    {
-      std::optional<token> result;
-
-      if(peek().which_kind() == kind)
-      {
-        result = advance();
-      }
-
-      return result;
-    }
-
-    template<std::same_as<token::kind>... TokenKinds>
-    std::optional<token> match_any(token::kind arg, TokenKinds... args)
-    {
-      std::optional<token> result;
-
-      std::array<token::kind, 1 + sizeof...(args)> kinds{arg, args...};
-
-      bool found = std::find(kinds.begin(), kinds.end(), peek().which_kind()) != kinds.end();
-
-      if(found)
-      {
-        result = advance();
-      }
-
-      return result;
-    }
-
-    token_stream stream_;
-    token_stream::iterator current_;
 };
 

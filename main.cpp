@@ -11,7 +11,7 @@ void usage()
 
 bool interpret(interpreter& interp, const std::string& source)
 {
-  parser p{token_stream{source}};
+  parser p{token_range{source}};
 
   return p.parse().transform([&](program&& prog)
   {

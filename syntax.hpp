@@ -1,7 +1,7 @@
 #pragma once
 
 #include "recursive_variant.hpp"
-#include "token_stream.hpp"
+#include "token_range.hpp"
 #include <fmt/core.h>
 #include <vector>
 

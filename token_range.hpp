@@ -210,10 +210,10 @@ const std::map<std::string,token::kind> token::keywords_ = {
 };
 
 
-class token_stream
+class token_range
 {
   public:
-    token_stream(std::string_view source, source_location loc = {})
+    token_range(std::string_view source, source_location loc = {})
       : source_(source), loc_(loc)
     {}
 
@@ -222,8 +222,8 @@ class token_stream
     class iterator
     {
       public:
-        iterator(token_stream& stream)
-          : stream_{stream}, current_{stream_.next()}
+        iterator(token_range& range)
+          : range_{range}, current_{range_.next()}
         {}
 
         token operator*() const
@@ -233,18 +233,18 @@ class token_stream
 
         iterator& operator++()
         {
-          current_ = stream_.next();
+          current_ = range_.next();
           return *this;
         }
 
         bool operator==(sentinel) const
         {
-          // EOF is the final token in the stream
+          // EOF is the final token in the range
           return current_.which_kind()== token::eof;
         }
 
       private:
-        token_stream& stream_;
+        token_range& range_;
         token current_;
     };
 
@@ -266,7 +266,7 @@ class token_stream
       while(not is_at_end())
       {
         source_location c_loc = loc_;
-        char c = advance();
+        char c = advance_char();
 
         switch(c)
         {
@@ -283,10 +283,10 @@ class token_stream
           case '*': return {token::star, c_loc};
 
           // possibly double-character lexemes
-          case '!': return { advance_if_matches('=') ? token::bang_equal : token::bang, c_loc};
-          case '=': return { advance_if_matches('=') ? token::equal_equal : token::equal, c_loc};
-          case '<': return { advance_if_matches('=') ? token::less_equal : token::less, c_loc};
-          case '>': return { advance_if_matches('=') ? token::greater_equal : token::greater, c_loc};
+          case '!': return { advance_char_if_matches('=') ? token::bang_equal : token::bang, c_loc};
+          case '=': return { advance_char_if_matches('=') ? token::equal_equal : token::equal, c_loc};
+          case '<': return { advance_char_if_matches('=') ? token::less_equal : token::less, c_loc};
+          case '>': return { advance_char_if_matches('=') ? token::greater_equal : token::greater, c_loc};
 
           // newline
           case '\n':
@@ -299,12 +299,12 @@ class token_stream
           case '/':
           {
             // check for a comment
-            if(advance_if_matches('/'))
+            if(advance_char_if_matches('/'))
             {
               // consume until the end of the line
               while(peek() != '\n' and not is_at_end())
               {
-                advance();
+                advance_char();
               }
             }
             else
@@ -365,19 +365,19 @@ class token_stream
       return source_[1];
     }
 
-    bool advance_if_matches(char expected)
+    bool advance_char_if_matches(char expected)
     {
       bool result = (not source_.empty()) and source_.front() == expected;
 
       if(result)
       {
-        advance();
+        advance_char();
       }
 
       return result;
     }
 
-    char advance()
+    char advance_char()
     {
       assert(not is_at_end());
       char result = source_.front();
@@ -397,7 +397,7 @@ class token_stream
           loc_.advance_line();
         }
 
-        lexeme.push_back(advance());
+        lexeme.push_back(advance_char());
       }
 
       if(is_at_end())
@@ -406,7 +406,7 @@ class token_stream
       }
 
       // consume terminating quote
-      advance();
+      advance_char();
 
       // XXX we'd handle escape sequences here
       std::string literal = lexeme;
@@ -422,18 +422,18 @@ class token_stream
 
       while(std::isdigit(peek()))
       {
-        lexeme.push_back(advance());
+        lexeme.push_back(advance_char());
       }
 
       if(peek() == '.' and std::isdigit(peek_next()))
       {
         // consume the decimal
-        lexeme.push_back(advance());
+        lexeme.push_back(advance_char());
 
         // consume the fractional part
         while(std::isdigit(peek()))
         {
-          lexeme.push_back(advance());
+          lexeme.push_back(advance_char());
         }
       }
 
@@ -457,7 +457,7 @@ class token_stream
 
       while(is_ok(peek()))
       {
-        lexeme.push_back(advance());
+        lexeme.push_back(advance_char());
       }
 
       return {token::classify_identifier(lexeme), lexeme, first_loc};
