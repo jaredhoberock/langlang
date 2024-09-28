@@ -11,7 +11,14 @@ void usage()
 
 bool interpret(interpreter& interp, const std::string& source)
 {
-  parser p{token_range{source}};
+  // XXX wow this sucks
+  std::vector<token> tokens;
+  for(token_range rng{source}; auto t : rng)
+  {
+    tokens.push_back(t);
+  }
+
+  parser p{tokens};
 
   return p.parse().transform([&](program&& prog)
   {

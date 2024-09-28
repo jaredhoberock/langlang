@@ -8,6 +8,8 @@
 #include <expected>
 #include <fmt/core.h>
 #include <optional>
+#include <ranges>
+#include <span>
 #include <vector>
 
 
@@ -36,9 +38,8 @@ constexpr auto operator|(std::expected<T,std::string>&& result, format_error_t x
 class parser
 {
   public:
-    parser(token_range tokens)
-      : tokens_(tokens),
-        current_(tokens_.begin())
+    parser(std::span<token> tokens)
+      : tokens_(tokens)
     {}
 
     std::expected<program,std::string> parse()
@@ -55,21 +56,25 @@ class parser
     }
 
   private:
-    token_range tokens_;
-    token_range::iterator current_;
+    std::span<token> tokens_;
 
     token peek() const
     {
-      return *current_;
+      if(tokens_.empty())
+      {
+        return token(token::eof, source_location());
+      }
+
+      return tokens_.front();
     }
 
     token advance()
     {
-      token result = *current_;
+      token result = peek();
 
-      if(current_ != tokens_.end())
+      if(not tokens_.empty())
       {
-        ++current_;
+        tokens_ = std::views::drop(tokens_, 1);
       }
 
       return result;
