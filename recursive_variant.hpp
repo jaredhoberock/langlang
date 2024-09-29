@@ -126,15 +126,6 @@ class recursive_variant : public std::variant<detail::box_if_incomplete_t<Types>
     using super_t = std::variant<detail::box_if_incomplete_t<Types>...>;
     using super_t::super_t;
 
-#if not defined(__circle_lang__) and defined(__clang_major__) and (__clang_major__ < 16)
-    // older clang needs this extra ctor
-    template<class U>
-      requires std::constructible_from<super_t, U&&>
-    recursive_variant(U&& value)
-      : super_t(std::forward<U>(value))
-    {}
-#endif // old clang version
-
     // add a boxing constructor
     template<class U>
       requires (not std::constructible_from<super_t, U&&>
