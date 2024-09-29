@@ -34,7 +34,9 @@ struct binary_expression
 
 struct grouping_expression
 {
+  token lparen;
   expression expr;
+  token rparen;
 };
 
 struct assignment_expression

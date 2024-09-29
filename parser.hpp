@@ -1,5 +1,6 @@
 #pragma once
 
+#include "parsers.hpp"
 #include "syntax.hpp"
 #include "token_range.hpp"
 #include <algorithm>
@@ -42,6 +43,8 @@ class parser
       : tokens_(tokens)
     {}
 
+    parser(const parser&) = default;
+
     std::expected<program,std::string> parse()
     {
       return parse_program().transform_error([&](std::string&& error)
@@ -60,24 +63,12 @@ class parser
 
     token peek() const
     {
-      if(tokens_.empty())
-      {
-        return token(token::eof, source_location());
-      }
-
-      return tokens_.front();
+      return parsers::peek(tokens_);
     }
 
     token advance()
     {
-      token result = peek();
-
-      if(not tokens_.empty())
-      {
-        tokens_ = std::views::drop(tokens_, 1);
-      }
-
-      return result;
+      return parsers::advance(tokens_);
     }
 
     std::optional<token> match(token::kind kind)
@@ -109,15 +100,18 @@ class parser
       return result;
     }
 
-
     std::expected<token,std::string> parse_token(token::kind k)
     {
-      if(peek().which_kind() != k)
+      // parse with a parser
+      auto result = parsers::token(k)(tokens_);
+
+      if(result)
       {
-        return std::unexpected(std::format("Expected '{}'", token::to_string(k)));
+        tokens_ = result->remaining;
+        return result->value;
       }
 
-      return advance();
+      return std::unexpected(result.error().message);
     }
 
     std::expected<token,std::string> parse_token(char c)
@@ -125,42 +119,28 @@ class parser
       return parse_token(token::to_kind(c));
     }
 
-    // primary := number | string | "true" | "false" | "nil" | "(" expression ")" | IDENTIFIER
+    // primary := literal | "(" expression ")" | IDENTIFIER
     std::expected<expression,std::string> parse_primary()
     {
-      if(std::optional n = match(token::number))
-      {
-        return literal{n->number_literal()};
-      }
-      else if(std::optional s = match(token::string))
-      {
-        return literal{s->string_literal()};
-      }
-      else if(match(token::true_))
-      {
-        return literal{true};
-      }
-      else if(match(token::false_))
-      {
-        return literal{false};
-      }
-      else if(match(token::nil))
-      {
-        return literal{nullptr};
-      }
-      else if(match(token::left_paren))
-      {
-        auto expr = parse_expression();
-        if(not expr) return std::unexpected(expr.error());
+      using namespace parsers;
 
-        auto rparen = parse_token(')') | format_error("{} after expression");
-        if(not rparen) return std::unexpected(rparen.error());
-
-        return grouping_expression{*expr};
-      }
-      else if(std::optional name = match(token::identifier))
+      auto expr = [](std::span<::token> tokens) -> std::expected<success<expression>,failure>
       {
-        return variable{*name};
+        parser p(tokens);
+        auto result = p.parse_expression();
+        std::span remaining = p.tokens_;
+
+        if(result) return success{*result, remaining};
+        return std::unexpected(failure{result.error(), remaining});
+      };
+
+      auto grouping_expr = '(' + expr + ')' >> to<grouping_expression>;
+
+      auto parser = (parsers::literal | grouping_expr | parsers::variable) >> to<expression>;
+      if(auto result = parser(tokens_))
+      {
+        tokens_ = result->remaining;
+        return result->value;
       }
 
       return std::unexpected("Expected primary expression");
