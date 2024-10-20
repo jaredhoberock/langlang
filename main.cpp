@@ -1,5 +1,5 @@
 #include "interpreter.hpp"
-#include "new_parser.hpp"
+#include "parsers.hpp"
 #include "syntax.hpp"
 #include <iostream>
 
@@ -18,7 +18,7 @@ bool interpret(interpreter& interp, const std::string& source)
     tokens.push_back(t);
   }
 
-  using namespace parse;
+  using namespace parsers;
 
   return parse_program(tokens).transform([&](success<program>&& result)
   {

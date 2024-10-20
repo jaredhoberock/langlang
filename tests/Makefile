@@ -2,8 +2,7 @@ CXX := clang++-19
 
 LANGLANG_SOURCES = ../interpreter.hpp \
 		   ../main.cpp \
-		   ../new_parser.hpp \
-		   ../parser.hpp \
+		   ../parsers.hpp \
 		   ../source_location.hpp \
 		   ../syntax.hpp \
 		   ../token_range.hpp

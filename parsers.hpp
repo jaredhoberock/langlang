@@ -8,8 +8,7 @@
 #include "token_range.hpp"
 
 
-// XXX rename this parsers
-namespace parse
+namespace parsers
 {
 
 
@@ -919,5 +918,5 @@ constexpr result<program> parse_program(std::span<token> input)
 }
 
 
-} // end parse
+} // end parsers
 
