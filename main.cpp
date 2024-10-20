@@ -1,11 +1,11 @@
 #include "interpreter.hpp"
-#include "parser.hpp"
+#include "new_parser.hpp"
 #include "syntax.hpp"
 #include <iostream>
 
 void usage()
 {
-  std::cout << "usage: rb [script]" << std::endl;
+  std::cout << "usage: langlang [script]" << std::endl;
 }
 
 
@@ -18,13 +18,13 @@ bool interpret(interpreter& interp, const std::string& source)
     tokens.push_back(t);
   }
 
-  parser p{tokens};
+  using namespace parse;
 
-  return p.parse().transform([&](program&& prog)
+  return parse_program(tokens).transform([&](success<program>&& result)
   {
     try
     {
-      interp(prog);
+      interp(result.value);
     }
     catch(std::runtime_error& error)
     {
@@ -34,9 +34,11 @@ bool interpret(interpreter& interp, const std::string& source)
 
     return true;
   })
-  .transform_error([](std::string&& error)
+  .transform_error([](failure&& error)
   {
-    auto message = std::format("Syntax error: {}", error);
+    token tok = error.remaining.front();
+
+    auto message = std::format("Syntax error: {} at '{}': {}", tok.location(), tok.lexeme(), error.message);
     std::cerr << message << std::endl;
     return message;
   })

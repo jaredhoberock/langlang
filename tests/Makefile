@@ -2,16 +2,19 @@ CXX := clang++-19
 
 LANGLANG_SOURCES = ../interpreter.hpp \
 		   ../main.cpp \
+		   ../new_parser.hpp \
 		   ../parser.hpp \
 		   ../source_location.hpp \
 		   ../syntax.hpp \
 		   ../token_range.hpp
 
-TEST_SRCS = 0_hello.lox
+# this rule runs a test foo.lox and captures its output to foo.out
+%.out : %.lox langlang
+	./langlang $< > $@
 
-# this rule runs a test silently
-%.test : %.lox langlang
-	./langlang $< > /dev/null
+# this rule compares a test's output to its expected result
+%.test : %.expected %.out
+	diff $^
 
 # a list of test programs with their file extension replaced with .test
 all-test-programs : $(addsuffix .test, $(basename $(wildcard *.lox)))
@@ -22,8 +25,8 @@ langlang: $(LANGLANG_SOURCES)
 all: all-test-programs
 
 clean:
-	rm -rf *.o langlang
+	rm -rf *.o *.out langlang
 
 # Phony Targets
-.PHONY: test all clean
+.PHONY: all-test-programs all clean
 
