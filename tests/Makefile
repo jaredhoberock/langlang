@@ -1,6 +1,7 @@
 CXX := clang++-19
 
 LANGLANG_SOURCES = ../interpreter.hpp \
+		   ../name_resolver.hpp \
 		   ../main.cpp \
 		   ../parsers.hpp \
 		   ../source_location.hpp \

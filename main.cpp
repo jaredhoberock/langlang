@@ -20,29 +20,29 @@ bool interpret(interpreter& interp, const std::string& source)
 
   using namespace parsers;
 
-  return parse_program(tokens).transform([&](success<program>&& result)
+  auto result = parse_program(tokens);
+  if(not result)
   {
-    try
-    {
-      interp(result.value);
-    }
-    catch(std::runtime_error& error)
-    {
-      std::cerr << "Runtime error: " << error.what() << std::endl;
-      return false;
-    }
-
-    return true;
-  })
-  .transform_error([](failure&& error)
-  {
+    auto error = result.error();
     token tok = error.remaining.front();
 
     auto message = std::format("Syntax error: {} at '{}': {}", tok.location(), tok.lexeme(), error.message);
     std::cerr << message << std::endl;
-    return message;
-  })
-  .has_value();
+    return false;
+  }
+
+  program prog = result.value().value;
+  try
+  {
+    interp(prog);
+  }
+  catch(std::runtime_error& error)
+  {
+    std::cerr << "Runtime error: " << error.what() << std::endl;
+    return false;
+  }
+
+  return true;
 }
 
 
@@ -74,6 +74,11 @@ int interpret_from_prompt()
 
   return 0;
 }
+
+
+// XXX TODO NEXT: AST nodes should not be copyable. we can't take the addresses of nodes
+//                and have them mean anything if nodes can be copied without warning
+//                ideally, nodes should be immutable as well
 
 
 int main(int argc, char** argv)

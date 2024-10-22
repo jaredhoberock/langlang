@@ -1,5 +1,6 @@
 #pragma once
 
+#include "name_resolver.hpp"
 #include "syntax.hpp"
 #include <chrono>
 #include <concepts>
@@ -13,17 +14,18 @@
 using value = recursive_variant<double, std::string, bool, std::nullptr_t, struct callable>;
 
 
+// a callable wraps a function which takes a reference to the interpreter and a vector<value> as arguments
 struct callable
 {
-  using function_type = std::function<value(const std::vector<value>&)>;
+  using function_type = std::function<value(struct interpreter&, const std::vector<value>&)>;
 
   callable(std::size_t arity, std::string&& repr, function_type&& func)
     : arity_{arity}, repr_{repr}, func_{std::move(func)}
   {}
 
-  value operator()(const std::vector<value>& arguments)
+  value operator()(struct interpreter& interp, const std::vector<value>& arguments)
   {
-    return func_(arguments);
+    return func_(interp, arguments);
   }
 
   std::size_t arity() const
@@ -187,6 +189,26 @@ class environment : public std::enable_shared_from_this<environment>
       return found != values_.end() ? found->second : enclosing_->lookup(name);
     }
 
+    value& lookup_in_ancestor(const token& name, int distance)
+    {
+      return ancestor(distance).lookup(name);
+    }
+
+    environment& ancestor(int distance)
+    {
+      environment* result = this;
+      for(int i = 0; i < distance; ++i)
+      {
+        result = result->enclosing_.get();
+        if(not result)
+        {
+          throw std::runtime_error("environment::ancestor: Invalid distance");
+        }
+      }
+
+      return *result;
+    }
+
     void dump() const
     {
       if(enclosing_)
@@ -208,16 +230,18 @@ class environment : public std::enable_shared_from_this<environment>
 
 struct user_function
 {
-  function_declaration decl;
+  const function_declaration& decl;
   std::shared_ptr<environment> closure;
 
-  value operator()(const std::vector<value>& args);
+  value operator()(struct interpreter& interp, const std::vector<value>& args);
 };
 
 
 struct interpreter
 {
   [[no_unique_address]] interpreter& self = *this;
+  std::map<const variable*,int> symbol_table;
+  name_resolver resolver = {symbol_table};
   std::shared_ptr<environment> global_env;
 
   interpreter()
@@ -380,14 +404,20 @@ struct interpreter
     return result;
   }
 
-  value operator()(environment& env, const variable& var)
+  // note that when we evaluate a variable we return a reference
+  value& operator()(environment& env, const variable& var)
   {
-    return env.lookup(var.name);
+    if(not symbol_table.contains(&var))
+    {
+      throw std::runtime_error(error_message(var.name, "Unresolved variable"));
+    }
+
+    return env.lookup_in_ancestor(var.name, symbol_table[&var]);
   }
 
   value operator()(environment& env, const assignment_expression& expr)
   {
-    return env.lookup(expr.var.name) = self(env, expr.expr);
+    return self(env, expr.var) = self(env, expr.expr);
   }
 
   value operator()(environment& env, const logical_expression& expr)
@@ -432,7 +462,7 @@ struct interpreter
       arguments.push_back(self(env, arg));
     }
 
-    return function(arguments);
+    return function(self, arguments);
   }
 
   value operator()(environment& env, const expression& expr)
@@ -550,7 +580,7 @@ struct interpreter
     // create a nested environment
     std::shared_ptr<environment> nested_env = std::make_shared<environment>(env);
 
-    for(auto& stmt : block.statements)
+    for(const auto& stmt : block.statements)
     {
       self(*nested_env, stmt);
     }
@@ -558,7 +588,10 @@ struct interpreter
 
   void operator()(const program& program)
   {
-    for(auto stmt: program.statements)
+    // first do name resolution
+    resolver(program);
+
+    for(const auto& stmt: program.statements)
     {
       self(*global_env, stmt);
     }
@@ -568,7 +601,7 @@ struct interpreter
   {
     const auto program_started = std::chrono::system_clock::now();
     
-    auto clock_function = callable{0, "<native fn>", [=](const std::vector<value>&) -> value
+    auto clock_function = callable{0, "<native fn>", [=](interpreter&, const std::vector<value>&) -> value
     {
       using namespace std::chrono;
     
@@ -582,7 +615,7 @@ struct interpreter
 };
 
 
-value user_function::operator()(const std::vector<value>& args)
+value user_function::operator()(interpreter& interp, const std::vector<value>& args)
 {
   // create an environment for this call
   std::shared_ptr<environment> env = std::make_shared<environment>(*closure);
@@ -598,7 +631,6 @@ value user_function::operator()(const std::vector<value>& args)
   try
   {
     // interpret the function body
-    interpreter interp;
     interp(*env, decl.body);
   }
   // XXX catching by value here causes a segfault when compiled by circle

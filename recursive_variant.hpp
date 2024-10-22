@@ -1,10 +1,10 @@
 #pragma once
 
 #include <concepts>
-#include <variant>
 #include <memory>
 #include <type_traits>
 #include <utility>
+#include <variant>
 
 namespace detail
 {
@@ -168,7 +168,7 @@ constexpr typename recursive_variant<Types...>::super_t&& super(recursive_varian
 template<class T>
 constexpr std::size_t index_of()
 {
-  return 1;
+  return -1;
 }
 
 template<class T, class Head, class... Tail>
@@ -178,8 +178,10 @@ constexpr std::size_t index_of()
   {
     return 0;
   }
-
-  return index_of<T,Tail...>();
+  else
+  {
+    return 1 + index_of<T,Tail...>();
+  }
 }
 
 
