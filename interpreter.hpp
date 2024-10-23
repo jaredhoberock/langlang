@@ -114,57 +114,24 @@ std::string error_message(token t, const char* message)
 }
 
 
-statement desugar_for_statement(for_statement&& stmt)
-{
-  std::optional initializer = std::move(stmt.initializer);
-  std::optional condition = std::move(stmt.condition);
-  std::optional increment = std::move(stmt.increment);
-
-  statement result = std::move(stmt.body);
-
-  // if the loop increment exists, append it to the loop body
-  if(increment)
-  {
-    std::vector<statement> statements = {std::move(result), expression_statement{std::move(*increment)}};
-    result = block_statement{std::move(statements)};
-  }
-  
-  // if the loop condition does not exist, create a constant condition
-  if(not condition)
-  {
-    condition = literal{true};
-  }
-  
-  // create a while loop
-  result = while_statement{*condition, std::move(result)};
-  
-  // if the loop initializer exists, introduce it into a new block containing it and the loop
-  if(initializer)
-  {
-    std::vector<statement> statements = {std::move(*initializer), std::move(result)};
-    result = block_statement{std::move(statements)};
-  }
-  
-  return result;
-}
-
-
 class environment : public std::enable_shared_from_this<environment>
 {
   public:
     environment(environment& enclosing)
-      : enclosing_{enclosing.share()}, values_{}
+      : std::enable_shared_from_this<environment>(),
+        enclosing_{enclosing.share()},
+        values_{}
     {}
 
     using value_type = std::map<std::string,value>::value_type;
 
-    environment()
-      : enclosing_{nullptr}, values_{}
+    environment(std::map<std::string,value> initial_values)
+      : std::enable_shared_from_this<environment>(),
+        enclosing_{nullptr},
+        values_{std::move(initial_values)}
     {}
 
-    environment(std::map<std::string,value> initial_values)
-      : enclosing_{nullptr}, values_{std::move(initial_values)}
-    {}
+    environment() : environment({}) {}
 
     std::shared_ptr<environment> share()
     {
