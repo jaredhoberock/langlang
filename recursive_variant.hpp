@@ -25,7 +25,7 @@ class box
     box(box&&) = default;
 
     box(const box& other)
-      : value_(std::make_unique<T>(other.value()))
+      : box(other.value())
     {}
 
     box& operator=(box&&) = default;
@@ -36,19 +36,31 @@ class box
       return *this;
     }
 
-    T& value()
+    T& value() &
     {
       return *value_;
     }
 
-    const T& value() const
+    const T& value() const &
     {
       return *value_;
+    }
+
+    T&& value() &&
+    {
+      return std::move(*value_);
     }
 
   private:
     std::unique_ptr<T> value_;
 };
+
+
+template<class T>
+struct is_box : std::false_type {};
+
+template<class T>
+struct is_box<box<T>> : std::true_type {};
 
 
 // see https://stackoverflow.com/a/1956217/722294
@@ -70,7 +82,7 @@ struct is_complete {
 
 } // end anonymous namespace
 
-#define IS_COMPLETE(X) is_complete<X,__COUNTER__>::value
+#define IS_COMPLETE(X) detail::is_complete<X,__COUNTER__>::value
 
 
 template<class T>
@@ -82,38 +94,53 @@ struct unbox_and_call
 {
   Function f_;
 
-  // forward unboxed arguments along
   template<class Arg>
-  static Arg&& unbox_if(Arg&& arg)
+  static decltype(auto) unbox(Arg&& arg)
   {
-    return std::forward<Arg>(arg);
-  }
+    using T = std::remove_cvref_t<Arg>;
 
-  template<class Arg>
-  static Arg& unbox_if(detail::box<Arg>& arg)
-  {
-    return arg.value();
-  }
-
-  template<class Arg>
-  static const Arg& unbox_if(const detail::box<Arg>& arg)
-  {
-    return arg.value();
-  }
-
-  template<class Arg>
-  static Arg&& unbox_if(detail::box<Arg>&& arg)
-  {
-    return std::move(arg.value());
+    if constexpr (is_box<T>::value)
+    {
+      return std::forward<Arg>(arg).value();
+    }
+    else
+    {
+      // arg isn't a box, just forward it
+      return std::forward<Arg>(arg);
+    }
   }
 
   // forward unboxxed arguments to f
   template<class... Args>
   decltype(auto) operator()(Args&&... args) const
   {
-    return std::forward<Function>(f_)(unbox_if(std::forward<Args>(args))...);
+    return std::forward<Function>(f_)(unbox(std::forward<Args>(args))...);
   }
 };
+
+
+template<class T>
+constexpr bool is_one_of_impl()
+{
+  return false;
+}
+
+template<class T, class Type1, class... Types>
+constexpr bool is_one_of_impl()
+{
+  if constexpr (std::same_as<T,Type1>)
+  {
+    return true;
+  }
+  else
+  {
+    return is_one_of_impl<T,Types...>();
+  }
+}
+
+
+template<class T, class... Types>
+concept is_one_of = is_one_of_impl<T,Types...>();
 
 
 } // end detail
@@ -126,12 +153,12 @@ class recursive_variant : public std::variant<detail::box_if_incomplete_t<Types>
     using super_t = std::variant<detail::box_if_incomplete_t<Types>...>;
     using super_t::super_t;
 
-    // add a boxing constructor
+    // add a boxing constructor for types that need to be boxed
     template<class U>
-      requires (not std::constructible_from<super_t, U&&>
-                and std::constructible_from<super_t, detail::box<std::decay_t<U>>>)
+      requires (detail::is_one_of<detail::box<std::remove_cvref_t<U>>,Types...> and
+                std::constructible_from<U,U&&>)
     recursive_variant(U&& value)
-      : super_t(detail::box<std::decay_t<U>>(std::forward<U>(value)))
+      : super_t(detail::box<std::remove_cvref_t<U>>(std::forward<U>(value)))
     {}
 };
 

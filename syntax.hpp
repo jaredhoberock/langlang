@@ -13,8 +13,12 @@ struct variable
 };
 
 using expression = recursive_variant<
-  literal, struct unary_expression, struct binary_expression,
-  struct grouping_expression, variable, struct assignment_expression,
+  literal,
+  variable,
+  struct unary_expression,
+  struct binary_expression,
+  struct grouping_expression,
+  struct assignment_expression,
   struct logical_expression,
   struct call_expression
 >;
@@ -59,6 +63,7 @@ struct call_expression
   token closing_paren;
 };
 
+
 struct assert_statement
 {
   expression expr;
@@ -82,10 +87,16 @@ struct variable_declaration
 };
 
 using statement = recursive_variant<
-  assert_statement, return_statement, print_statement, variable_declaration, 
-  struct expression_statement, struct block_statement,
-  struct function_declaration, struct if_statement,
-  struct while_statement, struct for_statement
+  assert_statement, 
+  return_statement,
+  print_statement,
+  variable_declaration, 
+  struct expression_statement,
+  struct block_statement,
+  struct function_declaration,
+  struct if_statement,
+  struct while_statement,
+  struct for_statement
 >;
 
 struct expression_statement
@@ -190,9 +201,21 @@ struct syntax_printer
     return fmt::format("({} {} {})", expr.op.lexeme(), self(expr.left_expr), self(expr.right_expr));
   }
 
+  std::string operator()(const call_expression& expr) const
+  {
+    // XXX we should print a variable number of args, but fmt makes that inconvenient
+    return fmt::format("(call {} <args>)", self(expr.callee));
+  }
+
   std::string operator()(const expression& expr) const
   {
     return visit(self, expr);
+  }
+
+  std::string operator()(const function_declaration&) const
+  {
+    throw std::runtime_error("syntax_printer(function_declaration): Unimplemented.");
+    return "";
   }
 
   std::string operator()(const expression_statement& stmt) const
@@ -200,14 +223,53 @@ struct syntax_printer
     return fmt::format("{};", self(stmt.expr));
   }
 
+  std::string operator()(const block_statement&) const
+  {
+    throw std::runtime_error("syntax_printer(block_statement): Unimplemented.");
+    return "";
+  }
+
+  std::string operator()(const while_statement&) const
+  {
+    throw std::runtime_error("syntax_printer(while_statement): Unimplemented.");
+    return "";
+  }
+
+  std::string operator()(const if_statement&) const
+  {
+    throw std::runtime_error("syntax_printer(if_statement): Unimplemented.");
+    return "";
+  }
+
+  std::string operator()(const for_statement&) const
+  {
+    throw std::runtime_error("syntax_printer(for_statement): Unimplemented.");
+    return "";
+  }
+
   std::string operator()(const print_statement& stmt) const
   {
     return fmt::format("print {};", self(stmt.expr));
   }
 
-  std::string operator()(const statement& stmt) const
+  std::string operator()(const assert_statement& stmt) const
   {
-    return visit(self, stmt);
+    return fmt::format("assert {};", self(stmt.expr));
+  }
+
+  std::string operator()(const return_statement& stmt) const
+  {
+    std::string result;
+    if(stmt.expr)
+    {
+      result = fmt::format("return {};", self(*stmt.expr));
+    }
+    else
+    {
+      result = fmt::format("return;");
+    }
+
+    return result;
   }
 
   std::string operator()(const variable_declaration& decl) const
@@ -225,5 +287,11 @@ struct syntax_printer
 
     return result;
   }
+
+  std::string operator()(const statement& stmt) const
+  {
+    return visit(self, stmt);
+  }
 };
+
 
