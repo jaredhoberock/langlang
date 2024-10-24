@@ -248,9 +248,40 @@ impl<'a> Parser<'a> {
         Ok(result)
     }
 
-    // logical_or := equality
+    // logical_and := equality ( "and" equality)*
+    fn logical_and(&mut self) -> Result<Expression, ParseError> {
+        let mut result = self.equality()?;
+
+        while let Ok(op) = self.token(TokenKind::And) {
+            // parse the rhs
+            let right_expr = self.equality()?;
+
+            result = Expression::Logical(LogicalExpression {
+                left_expr: Box::new(result),
+                op,
+                right_expr: Box::new(right_expr),
+            })
+        };
+
+        Ok(result)
+    }
+
+    // logical_or := logical_and ( "or" logical_and)*
     fn logical_or(&mut self) -> Result<Expression, ParseError> {
-        self.equality()
+        let mut result = self.logical_and()?;
+
+        while let Ok(op) = self.token(TokenKind::Or) {
+            // parse the rhs
+            let right_expr = self.logical_and()?;
+
+            result = Expression::Logical(LogicalExpression {
+                left_expr: Box::new(result),
+                op,
+                right_expr: Box::new(right_expr),
+            })
+        };
+
+        Ok(result)
     }
 
     // assignment := logical_or
