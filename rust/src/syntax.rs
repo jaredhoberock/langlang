@@ -9,6 +9,13 @@ pub enum Literal {
 }
 
 #[derive(Debug)]
+pub struct BinaryExpression {
+    pub left_expr: Box<Expression>,
+    pub op: Token,
+    pub right_expr: Box<Expression>,
+}
+
+#[derive(Debug)]
 pub struct GroupingExpression {
     pub lparen: Token,
     pub expr: Box<Expression>,
@@ -16,9 +23,25 @@ pub struct GroupingExpression {
 }
 
 #[derive(Debug)]
+pub struct LogicalExpression {
+    pub left_expr: Box<Expression>,
+    pub op: Token,
+    pub right_expr: Box<Expression>,
+}
+
+#[derive(Debug)]
+pub struct UnaryExpression {
+    pub op: Token,
+    pub expr: Box<Expression>,
+}
+
+#[derive(Debug)]
 pub enum Expression {
+    Binary(BinaryExpression),
     Grouping(GroupingExpression),
     Literal(Literal),
+    Logical(LogicalExpression),
+    Unary(UnaryExpression),
 }
 
 #[derive(Debug)]

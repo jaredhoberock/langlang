@@ -1,6 +1,7 @@
 use crate::syntax::*;
+use crate::token::*;
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum Value {
     Bool(bool),
     Nil,
@@ -31,6 +32,33 @@ impl Value {
             Value::String(s) => s.clone(),
             Value::Bool(b) => b.to_string(),
             Value::Nil => "nil".to_string(),
+        }
+    }
+
+    pub fn as_f64(&self) -> Result<f64,String> {
+        match self {
+            Value::Number(n) => Ok(*n),
+            _ => Err("Value is not a number".to_string()),
+        }
+    }
+
+    pub fn evaluate_binary_operation(&self, op: &TokenKind, rhs: &Self) -> Result<Self,String> {
+        use Value::*;
+
+        match op {
+            TokenKind::BangEqual => Ok(Bool(self != rhs)),
+            TokenKind::EqualEqual => Ok(Bool(self == rhs)),
+            TokenKind::Greater => Ok(Bool(self.as_f64()? > rhs.as_f64()?)),
+            TokenKind::GreaterEqual => Ok(Bool(self.as_f64()? >= rhs.as_f64()?)),
+            TokenKind::Less => Ok(Bool(self.as_f64()? < rhs.as_f64()?)),
+            TokenKind::LessEqual => Ok(Bool(self.as_f64()? <= rhs.as_f64()?)),
+            TokenKind::Minus => Ok(Number(self.as_f64()? - rhs.as_f64()?)),
+            TokenKind::Plus => match (self, rhs) {
+                (Number(n1), Number(n2)) => Ok(Number(n1 + n2)),
+                (String(s1), String(s2)) => Ok(String(s1.clone() + &s2)),
+                (_, _) => Err("Operands must be two numbers or two strings.".to_string()),
+            },
+            _ => Err("Unexpected operator in binary operation".to_string()),
         }
     }
 }
@@ -74,10 +102,38 @@ impl Interpreter {
         self.interpret_expression(env, &*expr.expr)
     }
 
+    fn interpret_logical_expression(&self, env: &Environment, expr: &LogicalExpression) -> Result<Value, String> {
+        let left = self.interpret_expression(env, &*expr.left_expr)?;
+        match expr.op.kind {
+            TokenKind::Or => if left.as_bool() { return Ok(left) },
+            TokenKind::And => if !left.as_bool() { return Ok(left) },
+            _ => return Err(format!("Unexpected '{}' in logical expression", expr.op.lexeme)) 
+        };
+        return self.interpret_expression(env, &*expr.right_expr);
+    }
+
+    fn interpret_binary_expression(&self, env: &Environment, expr: &BinaryExpression) -> Result<Value, String> {
+        let lhs = self.interpret_expression(env, &*expr.left_expr)?;
+        let rhs = self.interpret_expression(env, &*expr.right_expr)?;
+        lhs.evaluate_binary_operation(&expr.op.kind, &rhs)
+    }
+
+    fn interpret_unary_expression(&self, env: &Environment, expr: &UnaryExpression) -> Result<Value, String> {
+        let value = self.interpret_expression(env, &*expr.expr)?;
+        match expr.op.kind {
+            TokenKind::Bang => Ok(Value::Bool(!value.as_bool())),
+            TokenKind::Minus => Ok(Value::Number(-value.as_f64()?)),
+            _ => Err("Bad operator in unary_expression".to_string()),
+        }
+    }
+
     fn interpret_expression(&self, env: &Environment, expr: &Expression) -> Result<Value, String> {
         match expr {
-            Expression::Literal(l) => self.interpret_literal(env, l),
+            Expression::Binary(expr) => self.interpret_binary_expression(env, expr),
             Expression::Grouping(g) => self.interpret_grouping_expression(env, g),
+            Expression::Literal(l) => self.interpret_literal(env, l),
+            Expression::Logical(expr) => self.interpret_logical_expression(env, expr),
+            Expression::Unary(expr) => self.interpret_unary_expression(env, expr),
         }
     }
 

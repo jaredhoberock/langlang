@@ -59,6 +59,29 @@ impl<'a> Parser<'a> {
         Ok(result)
     }
 
+    fn either_token(&mut self, kind0: TokenKind, kind1: TokenKind) -> Result<Token, ParseError> {
+        let original_remaining = self.remaining;
+
+        let tok0 = self.token(kind0);
+        if tok0.is_ok() {
+            return tok0;
+        }
+
+        let tok1 = self.token(kind1);
+        if tok1.is_ok() {
+            return tok1
+        }
+
+        self.remaining = original_remaining;
+
+        let errors = vec![
+            tok0.unwrap_err(),
+            tok1.unwrap_err(),
+        ];
+
+        Err(ParseError::combine(errors))
+    }
+
     fn number_literal(&mut self) -> Result<Literal, ParseError> {
         self.token(TokenKind::Number)
             .map(|token| {
@@ -147,28 +170,97 @@ impl<'a> Parser<'a> {
         Err(ParseError::combine(errors))
     }
 
-    // expression := grouping_expression | literal
-    fn expression(&mut self) -> Result<Expression, ParseError> {
+    // primary_expression := literal | grouping_expression
+    fn primary_expression(&mut self) -> Result<Expression, ParseError> {
         let original_remaining = self.remaining;
-
-        let grouping = self.grouping_expression();
-        if grouping.is_ok() {
-            return grouping.map(Expression::Grouping);
-        }
 
         let literal = self.literal();
         if literal.is_ok() {
             return literal.map(Expression::Literal);
         }
 
+        let grouping = self.grouping_expression();
+        if grouping.is_ok() {
+            return grouping.map(Expression::Grouping);
+        }
+
         self.remaining = original_remaining;
 
         let errors = vec![
-            grouping.unwrap_err(),
             literal.unwrap_err(),
+            grouping.unwrap_err(),
         ];
 
         Err(ParseError::combine(errors))
+    }
+
+    // call := primary_expression
+    fn call(&mut self) -> Result<Expression, ParseError> {
+        self.primary_expression()
+    }
+
+    // unary := ( "!" | "-" ) | call
+    fn unary(&mut self) -> Result<Expression, ParseError> {
+        let original_remaining = self.remaining;
+
+        if let Ok(op) = self.either_token(TokenKind::Bang, TokenKind::Minus) {
+            let expr = UnaryExpression{
+                op : op,
+                expr : Box::new(self.unary()?),
+            };
+            Ok(Expression::Unary(expr))
+        } else {
+            self.remaining = original_remaining;
+            self.call()
+        }
+    }
+
+    // factor := unary
+    fn factor(&mut self) -> Result<Expression, ParseError> {
+        self.unary()
+    }
+
+    // term := factor
+    fn term(&mut self) -> Result<Expression, ParseError> {
+        self.factor()
+    }
+
+    // comparison := term
+    fn comparison(&mut self) -> Result<Expression, ParseError> {
+        self.term()
+    }
+
+    // equality := comparison ( ( "!=" | "==" ) comparison )*
+    fn equality(&mut self) -> Result<Expression, ParseError> {
+        let mut result = self.comparison()?;
+
+        while let Ok(op) = self.either_token(TokenKind::BangEqual, TokenKind::EqualEqual) {
+            // parse the rhs
+            let right_expr = self.comparison()?;
+
+            result = Expression::Binary(BinaryExpression {
+                left_expr: Box::new(result),
+                op,
+                right_expr: Box::new(right_expr),
+            })
+        };
+
+        Ok(result)
+    }
+
+    // logical_or := equality
+    fn logical_or(&mut self) -> Result<Expression, ParseError> {
+        self.equality()
+    }
+
+    // assignment := logical_or
+    fn assignment(&mut self) -> Result<Expression, ParseError> {
+        self.logical_or()
+    }
+
+    // expression := assignment
+    fn expression(&mut self) -> Result<Expression, ParseError> {
+        self.assignment()
     }
 
     // assert_statement := "assert" expression ";"
