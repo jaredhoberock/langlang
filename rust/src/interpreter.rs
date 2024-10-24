@@ -58,6 +58,14 @@ impl Value {
                 (String(s1), String(s2)) => Ok(String(s1.clone() + &s2)),
                 (_, _) => Err("Operands must be two numbers or two strings.".to_string()),
             },
+            TokenKind::Slash => match (self, rhs) {
+                (Number(n1), Number(n2)) => Ok(Number(n1 / n2)),
+                (_,_) => Err("Operands must be two numbers.".to_string()),
+            },
+            TokenKind::Star => match (self, rhs) {
+                (Number(n1), Number(n2)) => Ok(Number(n1 * n2)),
+                (_,_) => Err("Operands must be two numbers.".to_string()),
+            },
             _ => Err("Unexpected operator in binary operation".to_string()),
         }
     }

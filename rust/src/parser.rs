@@ -215,14 +215,40 @@ impl<'a> Parser<'a> {
         }
     }
 
-    // factor := unary
+    // factor := unary ( ( "/" | "*" ) ) unary )*
     fn factor(&mut self) -> Result<Expression, ParseError> {
-        self.unary()
+        let mut result = self.unary()?;
+
+        while let Ok(op) = self.either_token(TokenKind::Slash, TokenKind::Star) {
+            // parse the rhs
+            let right_expr = self.unary()?;
+
+            result = Expression::Binary(BinaryExpression {
+                left_expr: Box::new(result),
+                op,
+                right_expr: Box::new(right_expr),
+            })
+        };
+
+        Ok(result)
     }
 
-    // term := factor
+    // term := factor ( ( "-" | "+" ) factor )*
     fn term(&mut self) -> Result<Expression, ParseError> {
-        self.factor()
+        let mut result = self.factor()?;
+
+        while let Ok(op) = self.either_token(TokenKind::Minus, TokenKind::Plus) {
+            // parse the rhs
+            let right_expr = self.factor()?;
+
+            result = Expression::Binary(BinaryExpression {
+                left_expr: Box::new(result),
+                op,
+                right_expr: Box::new(right_expr),
+            })
+        };
+
+        Ok(result)
     }
 
     // comparison := term
