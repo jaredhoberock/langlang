@@ -9,6 +9,17 @@ pub enum Literal {
 }
 
 #[derive(Debug)]
+pub struct Variable {
+    pub name: Token,
+}
+
+#[derive(Debug)]
+pub struct AssignmentExpression {
+    pub var: Variable,
+    pub expr: Box<Expression>,
+}
+
+#[derive(Debug)]
 pub struct BinaryExpression {
     pub left_expr: Box<Expression>,
     pub op: Token,
@@ -37,11 +48,13 @@ pub struct UnaryExpression {
 
 #[derive(Debug)]
 pub enum Expression {
+    Assignment(AssignmentExpression),
     Binary(BinaryExpression),
     Grouping(GroupingExpression),
     Literal(Literal),
     Logical(LogicalExpression),
     Unary(UnaryExpression),
+    Variable(Variable),
 }
 
 #[derive(Debug)]
@@ -55,9 +68,16 @@ pub struct PrintStatement {
 }
 
 #[derive(Debug)]
+pub struct VariableDeclaration {
+    pub name: Token,
+    pub initializer: Option<Expression>,
+}
+
+#[derive(Debug)]
 pub enum Statement {
     Assert(AssertStatement),
     Print(PrintStatement),
+    VarDecl(VariableDeclaration),
 }
 
 #[derive(Debug)]

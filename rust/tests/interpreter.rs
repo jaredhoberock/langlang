@@ -6,33 +6,29 @@ use pretty_assertions::assert_eq;
 /// This function tests the interpreter by running it on a source file and comparing the output
 /// to the expected output in the corresponding `.expected` file.
 fn test_interpreter(source_file: &Path, expected_output_file: &Path) {
-    // Read the expected output from the `.expected` file
-    let expected_output = fs::read_to_string(expected_output_file)
-        .expect("Failed to read expected output file");
+   let expected_output = fs::read_to_string(expected_output_file)
+       .expect("Failed to read expected output file");
 
-    // Run the interpreter on the `.lox` file using `cargo run`
-    let output = Command::new("cargo")
-        .arg("run")
-        .arg("--quiet")
-        .arg("--")
-        .arg(source_file.to_str().unwrap())  // Pass the source file as input to the interpreter
-        .output()
-        .expect("Failed to run interpreter");
+   let binary_name = env!("CARGO_PKG_NAME");
+   let interpreter_path = format!("target/debug/{binary_name}");
 
-    // Convert the interpreter's output from bytes to a UTF-8 string
-    let interpreter_output = format!(
-        "{}{}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr),
-    );
+   let output = Command::new(interpreter_path)
+       .arg(source_file.to_str().unwrap())
+       .output()
+       .expect("Failed to run interpreter");
 
-    // Compare the interpreter output with the expected output
-    assert_eq!(
-        interpreter_output.trim(),
-        expected_output.trim(),
-        "Test failed for: {:?}",
-        source_file
-    );
+   let interpreter_output = format!(
+       "{}{}",
+       String::from_utf8_lossy(&output.stdout),
+       String::from_utf8_lossy(&output.stderr),
+   );
+
+   assert_eq!(
+       interpreter_output.trim(),
+       expected_output.trim(),
+       "Test failed for: {:?}",
+       source_file
+   );
 }
 
 #[test]

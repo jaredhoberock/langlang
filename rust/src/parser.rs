@@ -82,6 +82,14 @@ impl<'a> Parser<'a> {
         Err(ParseError::combine(errors))
     }
 
+    fn identifier(&mut self) -> Result<Token, ParseError> {
+        self.token(TokenKind::Identifier)
+    }
+
+    fn variable(&mut self) -> Result<Variable, ParseError> {
+        self.identifier().map(|name| { Variable{ name } })
+    }
+
     fn number_literal(&mut self) -> Result<Literal, ParseError> {
         self.token(TokenKind::Number)
             .map(|token| {
@@ -170,7 +178,7 @@ impl<'a> Parser<'a> {
         Err(ParseError::combine(errors))
     }
 
-    // primary_expression := literal | grouping_expression
+    // primary_expression := literal | grouping_expression | variable
     fn primary_expression(&mut self) -> Result<Expression, ParseError> {
         let original_remaining = self.remaining;
 
@@ -184,11 +192,17 @@ impl<'a> Parser<'a> {
             return grouping.map(Expression::Grouping);
         }
 
+        let var = self.variable();
+        if var.is_ok() {
+            return var.map(Expression::Variable);
+        }
+
         self.remaining = original_remaining;
 
         let errors = vec![
             literal.unwrap_err(),
             grouping.unwrap_err(),
+            var.unwrap_err(),
         ];
 
         Err(ParseError::combine(errors))
@@ -310,9 +324,30 @@ impl<'a> Parser<'a> {
         Ok(result)
     }
 
-    // assignment := logical_or
+    // assignment := logical_or | variable "=" assignment
     fn assignment(&mut self) -> Result<Expression, ParseError> {
-        self.logical_or()
+        let mut result = self.logical_or()?;
+
+        let original_remaining = self.remaining;
+
+        if let Ok(_) = self.token(TokenKind::Equal) {
+            if let Expression::Variable(var) = result {
+                // parse the rhs
+                let right_expr = self.assignment()?;
+
+                result = Expression::Assignment(AssignmentExpression {
+                    var,
+                    expr: Box::new(right_expr),
+                });
+            }
+            else {
+                let err = ParseError::new("Invalid assignment target".to_string(), self.remaining);
+                self.remaining = original_remaining;
+                return Err(err);
+            }
+        }
+
+        Ok(result)
     }
 
     // expression := assignment
@@ -361,9 +396,44 @@ impl<'a> Parser<'a> {
         Err(ParseError::combine(errors))
     }
 
-    // declaration := statement
+    // variable_declaration := "var" identifier ( "=" expression )? ";"
+    fn variable_declaration(&mut self) -> Result<Statement, ParseError> {
+        let _var = self.token(TokenKind::Var)?;
+        let name = self.identifier()?;
+
+        let initializer = if self.token(TokenKind::Equal).is_ok() {
+            Some(self.expression()?)
+        } else {
+            None
+        };
+
+        let _semi = self.token(TokenKind::Semicolon)?;
+
+        Ok(Statement::VarDecl(VariableDeclaration{name, initializer}))
+    }
+
+    // declaration := variable_declaration | statement
     fn declaration(&mut self) -> Result<Statement, ParseError> {
-        self.statement()
+        let original_remaining = self.remaining;
+
+        let var_decl = self.variable_declaration();
+        if var_decl.is_ok() {
+            return var_decl;
+        }
+
+        let stmt = self.statement();
+        if stmt.is_ok() {
+            return stmt;
+        }
+
+        self.remaining = original_remaining;
+
+        let errors = vec![
+            var_decl.unwrap_err(),
+            stmt.unwrap_err(),
+        ];
+
+        Err(ParseError::combine(errors))
     }
 
     // program := declaration* EOF

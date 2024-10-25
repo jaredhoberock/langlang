@@ -1,7 +1,11 @@
+use std::cell::RefCell;
+use std::collections::HashMap;
+use std::rc::Rc;
+
 use crate::syntax::*;
 use crate::token::*;
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Value {
     Bool(bool),
     Nil,
@@ -77,27 +81,66 @@ impl std::fmt::Display for Value {
     }
 }
 
+#[derive(Debug, Clone)]
 struct Environment {
+    enclosing: Option<Rc<RefCell<Environment>>>,
+    values: HashMap<String, Value>,
 }
 
 impl Environment {
     fn new() -> Self {
-        Environment {}
+        Environment {
+            enclosing: None,
+            values: HashMap::new(),
+        }
+    }
+
+    fn get(&self, name: &Token) -> Result<Value,String> {
+        if let Some(value) = self.values.get(&name.lexeme) {
+            Ok(value.clone())
+        } else if let Some(enclosing) = &self.enclosing {
+            enclosing.borrow().get(&name)
+        } else {
+            Err(format!("Undefined variable '{}'.", &name.lexeme))
+        }
+    }
+
+    fn put(&mut self, name: &Token, value: &Value) -> Result<(),String> {
+        if self.values.contains_key(&name.lexeme) {
+            self.values.insert(name.lexeme.clone(), value.clone());
+            Ok(())
+        }
+        else if let Some(enclosing) = &mut self.enclosing {
+            enclosing.borrow_mut().put(name, value)
+        }
+        else {
+            Err(format!("Undefined variable '{}'.", &name.lexeme))
+        }
+    }
+
+    fn define(&mut self, name: &Token, value: &Value) -> Result<(),String> {
+        if self.values.contains_key(&name.lexeme) {
+            Err(format!("Variable '{}' is already defined.", &name.lexeme))
+        } else {
+            self.values.insert(name.lexeme.clone(), value.clone());
+            Ok(())
+        }
     }
 }
 
 pub struct Interpreter {
-    global_env: Environment,
+    current_environment : Rc<RefCell<Environment>>,
 }
 
 impl Interpreter {
     pub fn new() -> Self {
+        let global_environment = Environment::new();
         Interpreter {
-            global_env: Environment::new(),
+            current_environment : Rc::new(RefCell::new(global_environment)),
         }
     }
 
-    fn interpret_literal(&self, _env: &Environment, lit: &Literal) -> Result<Value, String> {
+    fn interpret_literal(&self, lit: &Literal) -> Result<Value, String> {
         Ok(match lit {
             Literal::Bool(b) => Value::Bool(*b),
             Literal::Nil => Value::Nil,
@@ -106,28 +149,28 @@ impl Interpreter {
         })
     }
 
-    fn interpret_grouping_expression(&self, env: &Environment, expr: &GroupingExpression) -> Result<Value, String> {
-        self.interpret_expression(env, &*expr.expr)
+    fn interpret_grouping_expression(&mut self, expr: &GroupingExpression) -> Result<Value, String> {
+        self.interpret_expression(&*expr.expr)
     }
 
-    fn interpret_logical_expression(&self, env: &Environment, expr: &LogicalExpression) -> Result<Value, String> {
-        let left = self.interpret_expression(env, &*expr.left_expr)?;
+    fn interpret_logical_expression(&mut self, expr: &LogicalExpression) -> Result<Value, String> {
+        let left = self.interpret_expression(&*expr.left_expr)?;
         match expr.op.kind {
             TokenKind::Or => if left.as_bool() { return Ok(left) },
             TokenKind::And => if !left.as_bool() { return Ok(left) },
             _ => return Err(format!("Unexpected '{}' in logical expression", expr.op.lexeme)) 
         };
-        return self.interpret_expression(env, &*expr.right_expr);
+        return self.interpret_expression(&*expr.right_expr);
     }
 
-    fn interpret_binary_expression(&self, env: &Environment, expr: &BinaryExpression) -> Result<Value, String> {
-        let lhs = self.interpret_expression(env, &*expr.left_expr)?;
-        let rhs = self.interpret_expression(env, &*expr.right_expr)?;
+    fn interpret_binary_expression(&mut self, expr: &BinaryExpression) -> Result<Value, String> {
+        let lhs = self.interpret_expression(&*expr.left_expr)?;
+        let rhs = self.interpret_expression(&*expr.right_expr)?;
         lhs.evaluate_binary_operation(&expr.op.kind, &rhs)
     }
 
-    fn interpret_unary_expression(&self, env: &Environment, expr: &UnaryExpression) -> Result<Value, String> {
-        let value = self.interpret_expression(env, &*expr.expr)?;
+    fn interpret_unary_expression(&mut self, expr: &UnaryExpression) -> Result<Value, String> {
+        let value = self.interpret_expression(&*expr.expr)?;
         match expr.op.kind {
             TokenKind::Bang => Ok(Value::Bool(!value.as_bool())),
             TokenKind::Minus => Ok(Value::Number(-value.as_f64()?)),
@@ -135,40 +178,61 @@ impl Interpreter {
         }
     }
 
-    fn interpret_expression(&self, env: &Environment, expr: &Expression) -> Result<Value, String> {
+    fn interpret_variable(&mut self, var: &Variable) -> Result<Value, String> {
+        self.current_environment.borrow().get(&var.name)
+    }
+
+    fn interpret_assignment_expression(&mut self, expr: &AssignmentExpression) -> Result<Value, String> {
+        let value = self.interpret_expression(&*expr.expr)?;
+        self.current_environment.borrow_mut().put(&expr.var.name, &value)?;
+        Ok(value)
+    }
+
+    fn interpret_expression(&mut self, expr: &Expression) -> Result<Value, String> {
         match expr {
-            Expression::Binary(expr) => self.interpret_binary_expression(env, expr),
-            Expression::Grouping(g) => self.interpret_grouping_expression(env, g),
-            Expression::Literal(l) => self.interpret_literal(env, l),
-            Expression::Logical(expr) => self.interpret_logical_expression(env, expr),
-            Expression::Unary(expr) => self.interpret_unary_expression(env, expr),
+            Expression::Assignment(expr) => self.interpret_assignment_expression(expr),
+            Expression::Binary(expr) => self.interpret_binary_expression(expr),
+            Expression::Grouping(g) => self.interpret_grouping_expression(g),
+            Expression::Literal(l) => self.interpret_literal(l),
+            Expression::Logical(expr) => self.interpret_logical_expression(expr),
+            Expression::Unary(expr) => self.interpret_unary_expression(expr),
+            Expression::Variable(var) => self.interpret_variable(var),
         }
     }
 
-    fn interpret_assert_statement(&self, env: &Environment, stmt: &AssertStatement) -> Result<(), String> {
-        let val = self.interpret_expression(env, &stmt.expr)?;
+    fn interpret_assert_statement(&mut self, stmt: &AssertStatement) -> Result<(), String> {
+        let val = self.interpret_expression(&stmt.expr)?;
         if !val.as_bool() {
             return Err("assert failed".to_string());
         }
         Ok(())
     }
 
-    fn interpret_print_statement(&self, env: &Environment, stmt: &PrintStatement) -> Result<(), String> {
-        let val = self.interpret_expression(env, &stmt.expr)?;
+    fn interpret_print_statement(&mut self, stmt: &PrintStatement) -> Result<(), String> {
+        let val = self.interpret_expression(&stmt.expr)?;
         println!("{}", val);
         Ok(())
     }
 
-    fn interpret_statement(&self, env: &Environment, stmt: &Statement) -> Result<(), String> {
+    fn interpret_variable_declaration(&mut self, decl: &VariableDeclaration) -> Result<(), String> {
+        let value = match &decl.initializer {
+            Some(expr) => self.interpret_expression(expr)?,
+            None => Value::Nil,
+        };
+        self.current_environment.borrow_mut().define(&decl.name, &value)
+    }
+
+    fn interpret_statement(&mut self, stmt: &Statement) -> Result<(), String> {
         match stmt {
-            Statement::Assert(stmt) => self.interpret_assert_statement(env, stmt),
-            Statement::Print(stmt) => self.interpret_print_statement(env, stmt),
+            Statement::Assert(stmt) => self.interpret_assert_statement(stmt),
+            Statement::Print(stmt) => self.interpret_print_statement(stmt),
+            Statement::VarDecl(decl) => self.interpret_variable_declaration(decl),
         }
     }
 
-    pub fn interpret_program(&self, prog: &Program) -> Result<(), String> {
+    pub fn interpret_program(&mut self, prog: &Program) -> Result<(), String> {
         for stmt in &prog.statements {
-            self.interpret_statement(&self.global_env, stmt)?
+            self.interpret_statement(stmt)?
         }
         Ok(())
     }
