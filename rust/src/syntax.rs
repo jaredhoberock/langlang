@@ -63,6 +63,11 @@ pub struct AssertStatement {
 }
 
 #[derive(Debug)]
+pub struct BlockStatement {
+    pub statements: Vec<Statement>,
+}
+
+#[derive(Debug)]
 pub struct ExpressionStatement {
     pub expr: Expression,
 }
@@ -81,6 +86,7 @@ pub struct VariableDeclaration {
 #[derive(Debug)]
 pub enum Statement {
     Assert(AssertStatement),
+    Block(BlockStatement),
     Expr(ExpressionStatement),
     Print(PrintStatement),
     VarDecl(VariableDeclaration),

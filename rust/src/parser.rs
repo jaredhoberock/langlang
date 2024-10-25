@@ -20,6 +20,18 @@ impl ParseError {
         }
     }
 
+    // This returns a closure that takes a ParseError and returns a ParseError whose
+    // message has been formatted with the given fmt string
+    pub fn format_message(fmt: &'static str) -> impl FnOnce(ParseError) -> ParseError {
+        |e| ParseError {
+            // format the message of e using the fmt string
+            message: fmt.replace("{}", &e.message),
+            // preserve the other details of the original ParseError
+            remaining_len: e.remaining_len,
+            error_token: e.error_token,
+        }
+    }
+
     // Take the error with the least remaining input (most progress)
     pub fn combine(errors: Vec<ParseError>) -> ParseError {
         errors.into_iter()
@@ -376,7 +388,26 @@ impl<'a> Parser<'a> {
         let _assert = self.token(TokenKind::Assert)?;
         let expr = self.expression()?;
         let _semi = self.token(TokenKind::Semicolon)?;
-        return Ok(Statement::Assert(AssertStatement{expr}));
+        Ok(Statement::Assert(AssertStatement{expr}))
+    }
+
+    // block_statement := "{" ( declaration )* "}"
+    fn block_statement(&mut self) -> Result<Statement, ParseError> {
+        let _lbrace = self.token(TokenKind::LeftBrace)
+            .map_err(ParseError::format_message("{} before block"))?;
+
+        let mut statements = Vec::new();
+
+        loop {
+            if self.token(TokenKind::RightBrace).is_ok() {
+                break;
+            }
+
+            let stmt = self.declaration()?;
+            statements.push(stmt);
+        }
+
+        Ok(Statement::Block(BlockStatement{statements}))
     }
 
     // expression_statement := expression ";"
@@ -394,13 +425,18 @@ impl<'a> Parser<'a> {
         Ok(Statement::Print(PrintStatement{expr}))
     }
 
-    // statement := assert_statement | expression_statement | print_statement
+    // statement := assert_statement | block_statement | expression_statement | print_statement
     fn statement(&mut self) -> Result<Statement, ParseError> {
         let original_remaining = self.remaining;
 
         let assert = self.assert_statement();
         if assert.is_ok() {
             return assert;
+        }
+
+        let block = self.block_statement();
+        if block.is_ok() {
+            return block;
         }
 
         let expr_stmt = self.expression_statement();
@@ -418,6 +454,7 @@ impl<'a> Parser<'a> {
 
         let errors = vec![
             assert.unwrap_err(),
+            block.unwrap_err(),
             expr_stmt.unwrap_err(),
             print.unwrap_err(),
         ];

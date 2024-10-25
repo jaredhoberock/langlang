@@ -95,6 +95,13 @@ impl Environment {
         }
     }
 
+    fn new_with_enclosing(enclosing: Rc<RefCell<Environment>>) -> Self {
+        Environment {
+            enclosing: Some(enclosing),
+            values: HashMap::new(),
+        }
+    }
+
     fn get(&self, name: &Token) -> Result<Value,String> {
         if let Some(value) = self.values.get(&name.lexeme) {
             Ok(value.clone())
@@ -138,6 +145,19 @@ impl Interpreter {
         Interpreter {
             current_environment : Rc::new(RefCell::new(global_environment)),
         }
+    }
+
+    pub fn push_environment(&mut self) {
+        let new_env = Environment::new_with_enclosing(self.current_environment.clone());
+        self.current_environment = Rc::new(RefCell::new(new_env));
+    }
+
+    pub fn pop_environment(&mut self) {
+        let enclosing = {
+            let current = self.current_environment.borrow();
+            current.enclosing.clone()
+        };
+        self.current_environment = enclosing.expect("Can't pop global environment");
     }
 
     fn interpret_literal(&self, lit: &Literal) -> Result<Value, String> {
@@ -208,6 +228,23 @@ impl Interpreter {
         Ok(())
     }
 
+    fn interpret_block_statement(&mut self, block: &BlockStatement) -> Result<(), String> {
+        self.push_environment();
+
+        let mut result = Ok(());
+
+        for stmt in &block.statements {
+            if let Err(e) = self.interpret_statement(stmt) {
+                result = Err(e);
+                break;
+            }
+        };
+
+        self.pop_environment();
+
+        result
+    }
+
     fn interpret_expression_statement(&mut self, stmt: &ExpressionStatement) -> Result<(), String> {
         self.interpret_expression(&stmt.expr)?;
         Ok(())
@@ -230,6 +267,7 @@ impl Interpreter {
     fn interpret_statement(&mut self, stmt: &Statement) -> Result<(), String> {
         match stmt {
             Statement::Assert(stmt) => self.interpret_assert_statement(stmt),
+            Statement::Block(stmt) => self.interpret_block_statement(stmt),
             Statement::Expr(stmt) => self.interpret_expression_statement(stmt),
             Statement::Print(stmt) => self.interpret_print_statement(stmt),
             Statement::VarDecl(decl) => self.interpret_variable_declaration(decl),
