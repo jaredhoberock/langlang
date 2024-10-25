@@ -355,47 +355,6 @@ impl<'a> Parser<'a> {
         self.assignment()
     }
 
-    // assert_statement := "assert" expression ";"
-    fn assert_statement(&mut self) -> Result<Statement, ParseError> {
-        let _assert = self.token(TokenKind::Assert)?;
-        let expr = self.expression()?;
-        let _semi = self.token(TokenKind::Semicolon)?;
-        return Ok(Statement::Assert(AssertStatement{expr}));
-    }
-
-    // print_statement := "print" expression ";"
-    fn print_statement(&mut self) -> Result<Statement, ParseError> {
-        let _print = self.token(TokenKind::Print)?;
-        let expr = self.expression()?;
-        let _semi = self.token(TokenKind::Semicolon)?;
-        Ok(Statement::Print(PrintStatement{expr}))
-    }
-
-    // statement := assert_statement | print_statement
-    fn statement(&mut self) -> Result<Statement, ParseError> {
-        let original_remaining = self.remaining;
-
-        let assert = self.assert_statement();
-        if assert.is_ok() {
-            return assert;
-        }
-
-        let print = self.print_statement();
-        if print.is_ok() {
-            return print;
-        }
-
-        // restore state after failure
-        self.remaining = original_remaining;
-
-        let errors = vec![
-            assert.unwrap_err(),
-            print.unwrap_err(),
-        ];
-
-        Err(ParseError::combine(errors))
-    }
-
     // variable_declaration := "var" identifier ( "=" expression )? ";"
     fn variable_declaration(&mut self) -> Result<Statement, ParseError> {
         let _var = self.token(TokenKind::Var)?;
@@ -410,6 +369,60 @@ impl<'a> Parser<'a> {
         let _semi = self.token(TokenKind::Semicolon)?;
 
         Ok(Statement::VarDecl(VariableDeclaration{name, initializer}))
+    }
+
+    // assert_statement := "assert" expression ";"
+    fn assert_statement(&mut self) -> Result<Statement, ParseError> {
+        let _assert = self.token(TokenKind::Assert)?;
+        let expr = self.expression()?;
+        let _semi = self.token(TokenKind::Semicolon)?;
+        return Ok(Statement::Assert(AssertStatement{expr}));
+    }
+
+    // expression_statement := expression ";"
+    fn expression_statement(&mut self) -> Result<Statement, ParseError> {
+        let expr = self.expression()?;
+        let _semi = self.token(TokenKind::Semicolon)?;
+        return Ok(Statement::Expr(ExpressionStatement{expr}));
+    }
+
+    // print_statement := "print" expression ";"
+    fn print_statement(&mut self) -> Result<Statement, ParseError> {
+        let _print = self.token(TokenKind::Print)?;
+        let expr = self.expression()?;
+        let _semi = self.token(TokenKind::Semicolon)?;
+        Ok(Statement::Print(PrintStatement{expr}))
+    }
+
+    // statement := assert_statement | expression_statement | print_statement
+    fn statement(&mut self) -> Result<Statement, ParseError> {
+        let original_remaining = self.remaining;
+
+        let assert = self.assert_statement();
+        if assert.is_ok() {
+            return assert;
+        }
+
+        let expr_stmt = self.expression_statement();
+        if expr_stmt.is_ok() {
+            return expr_stmt;
+        }
+
+        let print = self.print_statement();
+        if print.is_ok() {
+            return print;
+        }
+
+        // restore state after failure
+        self.remaining = original_remaining;
+
+        let errors = vec![
+            assert.unwrap_err(),
+            expr_stmt.unwrap_err(),
+            print.unwrap_err(),
+        ];
+
+        Err(ParseError::combine(errors))
     }
 
     // declaration := variable_declaration | statement

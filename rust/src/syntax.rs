@@ -63,6 +63,11 @@ pub struct AssertStatement {
 }
 
 #[derive(Debug)]
+pub struct ExpressionStatement {
+    pub expr: Expression,
+}
+
+#[derive(Debug)]
 pub struct PrintStatement {
     pub expr: Expression,
 }
@@ -76,6 +81,7 @@ pub struct VariableDeclaration {
 #[derive(Debug)]
 pub enum Statement {
     Assert(AssertStatement),
+    Expr(ExpressionStatement),
     Print(PrintStatement),
     VarDecl(VariableDeclaration),
 }

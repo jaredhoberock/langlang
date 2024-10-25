@@ -208,6 +208,11 @@ impl Interpreter {
         Ok(())
     }
 
+    fn interpret_expression_statement(&mut self, stmt: &ExpressionStatement) -> Result<(), String> {
+        self.interpret_expression(&stmt.expr);
+        Ok(())
+    }
+
     fn interpret_print_statement(&mut self, stmt: &PrintStatement) -> Result<(), String> {
         let val = self.interpret_expression(&stmt.expr)?;
         println!("{}", val);
@@ -225,6 +230,7 @@ impl Interpreter {
     fn interpret_statement(&mut self, stmt: &Statement) -> Result<(), String> {
         match stmt {
             Statement::Assert(stmt) => self.interpret_assert_statement(stmt),
+            Statement::Expr(stmt) => self.interpret_expression_statement(stmt),
             Statement::Print(stmt) => self.interpret_print_statement(stmt),
             Statement::VarDecl(decl) => self.interpret_variable_declaration(decl),
         }
