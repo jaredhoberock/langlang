@@ -209,7 +209,7 @@ impl Interpreter {
     }
 
     fn interpret_expression_statement(&mut self, stmt: &ExpressionStatement) -> Result<(), String> {
-        self.interpret_expression(&stmt.expr);
+        self.interpret_expression(&stmt.expr)?;
         Ok(())
     }
 
