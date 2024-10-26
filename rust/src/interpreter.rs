@@ -153,25 +153,27 @@ impl std::fmt::Debug for Callable {
     }
 }
 
+type Shared<T> = Rc<RefCell<T>>;
+
 #[derive(Clone)]
 pub struct Environment {
-    enclosing: Option<Rc<RefCell<Environment>>>,
+    enclosing: Option<Shared<Environment>>,
     values: HashMap<String, Value>,
 }
 
 impl Environment {
-    fn new() -> Self {
-        Environment {
+    fn new_shared() -> Shared<Self> {
+        Rc::new(RefCell::new(Environment {
             enclosing: None,
             values: HashMap::new(),
-        }
+        }))
     }
 
-    fn new_with_enclosing(enclosing: Rc<RefCell<Environment>>) -> Self {
-        Environment {
+    fn new_shared_with_enclosing(enclosing: Shared<Environment>) -> Shared<Self> {
+        Rc::new(RefCell::new(Environment {
             enclosing: Some(enclosing),
             values: HashMap::new(),
-        }
+        }))
     }
 
     fn get(&self, name: &Token) -> Result<Value,String> {
@@ -234,7 +236,7 @@ impl UserFunction {
 
     pub fn call(&self, interpreter: &mut Interpreter, args: &Vec<Value>) -> Result<Value,String> {
         // create a new environment for the function call
-        let env = Rc::new(RefCell::new(Environment::new_with_enclosing(self.closure.clone())));
+        let env = Environment::new_shared_with_enclosing(self.closure.clone());
 
         // SAFETY: we know the FunctionDeclaration outlives the Interpreter
         let decl = unsafe { &*self.decl };
@@ -260,15 +262,13 @@ pub struct Interpreter {
 
 impl Interpreter {
     pub fn new() -> Self {
-        let global_environment = Environment::new();
         Interpreter {
-            current_environment : Rc::new(RefCell::new(global_environment)),
+            current_environment : Environment::new_shared(),
         }
     }
 
     pub fn push_environment(&mut self) {
-        let new_env = Environment::new_with_enclosing(self.current_environment.clone());
-        self.current_environment = Rc::new(RefCell::new(new_env));
+        self.current_environment = Environment::new_shared_with_enclosing(self.current_environment.clone());
     }
 
     pub fn pop_environment(&mut self) {
