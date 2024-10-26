@@ -16,7 +16,7 @@ enum Value {
 }
 
 impl Value {
-    pub fn as_bool(&self) -> bool {
+    fn as_bool(&self) -> bool {
         match self {
             Value::Bool(b) => *b,
             Value::Nil => false,
@@ -24,7 +24,7 @@ impl Value {
         }
     }
 
-    pub fn as_string(&self) -> String {
+    fn as_string(&self) -> String {
         match self {
             Value::Callable(c) => c.to_string(),
             Value::Number(n) => {
@@ -41,14 +41,14 @@ impl Value {
         }
     }
 
-    pub fn as_f64(&self) -> Result<f64, String> {
+    fn as_f64(&self) -> Result<f64, String> {
         match self {
             Value::Number(n) => Ok(*n),
             _ => Err("Value is not a number".to_string()),
         }
     }
 
-    pub fn evaluate_binary_operation(&self, op: &TokenKind, rhs: &Self) -> Result<Self, String> {
+    fn evaluate_binary_operation(&self, op: &TokenKind, rhs: &Self) -> Result<Self, String> {
         use Value::*;
 
         match op {
@@ -97,7 +97,7 @@ enum CallableKind {
 }
 
 impl Callable {
-    pub fn new_user_function(arity: usize, repr: String, func: UserFunction) -> Self {
+    fn new_user_function(arity: usize, repr: String, func: UserFunction) -> Self {
         Self {
             arity,
             repr,
@@ -105,7 +105,7 @@ impl Callable {
         }
     }
 
-    pub fn new_built_in_function<F>(arity: usize, repr: String, func: F) -> Self
+    fn new_built_in_function<F>(arity: usize, repr: String, func: F) -> Self
     where
         F: Fn(&mut Interpreter, &Vec<Value>) -> Result<Value, String> + 'static,
     {
@@ -116,18 +116,18 @@ impl Callable {
         }
     }
 
-    pub fn call(&self, interp: &mut Interpreter, arguments: &Vec<Value>) -> Result<Value, String> {
+    fn call(&self, interp: &mut Interpreter, arguments: &Vec<Value>) -> Result<Value, String> {
         match &self.func {
             CallableKind::BuiltIn(f) => f(interp, arguments),
             CallableKind::User(f) => f.call(interp, arguments),
         }
     }
 
-    pub fn arity(&self) -> usize {
+    fn arity(&self) -> usize {
         self.arity
     }
 
-    pub fn to_string(&self) -> String {
+    fn to_string(&self) -> String {
         self.repr.clone()
     }
 }
@@ -154,7 +154,7 @@ impl std::fmt::Debug for Callable {
 type Shared<T> = Rc<RefCell<T>>;
 
 #[derive(Clone)]
-pub struct Environment {
+struct Environment {
     enclosing: Option<Shared<Environment>>,
     values: HashMap<String, Value>,
 }
@@ -226,11 +226,11 @@ struct UserFunction {
 }
 
 impl UserFunction {
-    pub fn new(decl: &FunctionDeclaration, closure: Shared<Environment>) -> Self {
+    fn new(decl: &FunctionDeclaration, closure: Shared<Environment>) -> Self {
         UserFunction { decl, closure }
     }
 
-    pub fn call(&self, interpreter: &mut Interpreter, args: &Vec<Value>) -> Result<Value, String> {
+    fn call(&self, interpreter: &mut Interpreter, args: &Vec<Value>) -> Result<Value, String> {
         // create a new environment for the function call
         let env = Environment::new_shared_with_enclosing(self.closure.clone());
 
@@ -265,12 +265,12 @@ impl Interpreter {
         }
     }
 
-    pub fn push_environment(&mut self) {
+    fn push_environment(&mut self) {
         self.current_environment =
             Environment::new_shared_with_enclosing(self.current_environment.clone());
     }
 
-    pub fn pop_environment(&mut self) {
+    fn pop_environment(&mut self) {
         let enclosing = {
             let current = self.current_environment.borrow();
             current.enclosing.clone()
@@ -278,7 +278,7 @@ impl Interpreter {
         self.current_environment = enclosing.expect("Can't pop global environment");
     }
 
-    pub fn with_environment<T>(
+    fn with_environment<T>(
         &mut self,
         new_env: Shared<Environment>,
         f: impl FnOnce(&mut Self) -> T,
