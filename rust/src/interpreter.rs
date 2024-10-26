@@ -226,11 +226,11 @@ impl std::fmt::Debug for Environment {
 #[derive(Debug, Clone)]
 struct UserFunction {
     decl : *const FunctionDeclaration,
-    closure : Rc<RefCell<Environment>>,
+    closure : Shared<Environment>,
 }
 
 impl UserFunction {
-    pub fn new(decl: &FunctionDeclaration, closure: Rc<RefCell<Environment>>) -> Self {
+    pub fn new(decl: &FunctionDeclaration, closure: Shared<Environment>) -> Self {
         UserFunction { decl, closure }
     }
 
@@ -257,7 +257,7 @@ impl UserFunction {
 }
 
 pub struct Interpreter {
-    current_environment : Rc<RefCell<Environment>>,
+    current_environment : Shared<Environment>,
 }
 
 impl Interpreter {
@@ -279,7 +279,7 @@ impl Interpreter {
         self.current_environment = enclosing.expect("Can't pop global environment");
     }
 
-    pub fn with_environment<T>(&mut self, new_env: Rc<RefCell<Environment>>, f: impl FnOnce(&mut Self) -> T) -> T {
+    pub fn with_environment<T>(&mut self, new_env: Shared<Environment>, f: impl FnOnce(&mut Self) -> T) -> T {
         let mut temp_env = new_env;
         std::mem::swap(&mut self.current_environment, &mut temp_env);
         let result = f(self);
