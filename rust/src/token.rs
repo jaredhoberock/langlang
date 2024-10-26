@@ -105,7 +105,7 @@ impl std::fmt::Display for TokenKind {
 #[derive(Debug, Clone, PartialEq)]
 pub enum TokenLiteral {
     String(String),
-    Number(f64)
+    Number(f64),
 }
 
 impl TokenLiteral {
@@ -129,7 +129,7 @@ pub struct Token {
     pub kind: TokenKind,
     pub lexeme: String,
     pub literal: Option<TokenLiteral>,
-    pub location: SourceLocation
+    pub location: SourceLocation,
 }
 
 impl Token {
@@ -142,7 +142,12 @@ impl Token {
         }
     }
 
-    pub fn with_string_literal(kind: TokenKind, lexeme: String, literal: String, location: SourceLocation) -> Self {
+    pub fn with_string_literal(
+        kind: TokenKind,
+        lexeme: String,
+        literal: String,
+        location: SourceLocation,
+    ) -> Self {
         Token {
             kind,
             lexeme,
@@ -151,7 +156,12 @@ impl Token {
         }
     }
 
-    pub fn with_number_literal(kind: TokenKind, lexeme: String, literal: f64, location: SourceLocation) -> Self {
+    pub fn with_number_literal(
+        kind: TokenKind,
+        lexeme: String,
+        literal: f64,
+        location: SourceLocation,
+    ) -> Self {
         Token {
             kind,
             lexeme,
@@ -160,4 +170,3 @@ impl Token {
         }
     }
 }
-

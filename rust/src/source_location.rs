@@ -6,10 +6,7 @@ pub struct SourceLocation {
 
 impl SourceLocation {
     pub fn new() -> Self {
-        SourceLocation {
-            line: 1,
-            column: 1,
-        }
+        SourceLocation { line: 1, column: 1 }
     }
 
     pub fn advance_line(&mut self) {
@@ -24,6 +21,6 @@ impl SourceLocation {
 
 impl std::fmt::Display for SourceLocation {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-      write!(f, "Line: {}, Column: {}", self.line, self.column)
+        write!(f, "Line: {}, Column: {}", self.line, self.column)
     }
 }

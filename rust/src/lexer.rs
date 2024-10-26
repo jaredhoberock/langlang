@@ -59,7 +59,11 @@ impl<'a> Lexer<'a> {
         }
 
         if self.is_at_end() {
-            return Token::new(TokenKind::Error, String::from("Unterminated string"), start_loc)
+            return Token::new(
+                TokenKind::Error,
+                String::from("Unterminated string"),
+                start_loc,
+            );
         }
 
         // consume and include closing quote
@@ -69,8 +73,8 @@ impl<'a> Lexer<'a> {
         Token::with_string_literal(
             TokenKind::String,
             lexeme.clone(),
-            lexeme[1..lexeme.len()-1].to_string(),
-            start_loc
+            lexeme[1..lexeme.len() - 1].to_string(),
+            start_loc,
         )
     }
 
@@ -165,34 +169,34 @@ impl<'a> Iterator for Lexer<'a> {
                     } else {
                         Token::new(TokenKind::Bang, String::from("!"), c_loc)
                     }
-                },
+                }
                 '=' => {
                     if self.match_char('=') {
                         Token::new(TokenKind::EqualEqual, String::from("=="), c_loc)
                     } else {
                         Token::new(TokenKind::Equal, String::from("="), c_loc)
                     }
-                },
+                }
                 '<' => {
                     if self.match_char('=') {
                         Token::new(TokenKind::LessEqual, String::from("<="), c_loc)
                     } else {
                         Token::new(TokenKind::Less, String::from("<"), c_loc)
                     }
-                },
+                }
                 '>' => {
                     if self.match_char('=') {
                         Token::new(TokenKind::GreaterEqual, String::from(">="), c_loc)
                     } else {
                         Token::new(TokenKind::Greater, String::from(">"), c_loc)
                     }
-                },
+                }
 
                 // newline
                 '\n' => {
                     self.loc.advance_line();
                     continue;
-                },
+                }
 
                 // slash
                 '/' => {
@@ -205,7 +209,7 @@ impl<'a> Iterator for Lexer<'a> {
                     } else {
                         Token::new(TokenKind::Slash, String::from("/"), c_loc)
                     }
-                },
+                }
 
                 // whitespace
                 ' ' | '\r' | '\t' => continue,
@@ -220,7 +224,11 @@ impl<'a> Iterator for Lexer<'a> {
                     } else if c == '_' || c.is_ascii_alphabetic() {
                         self.scan_identifier(c, c_loc)
                     } else {
-                        Token::new(TokenKind::Error, String::from("Unexpected character"), c_loc)
+                        Token::new(
+                            TokenKind::Error,
+                            String::from("Unexpected character"),
+                            c_loc,
+                        )
                     }
                 }
             };
@@ -232,7 +240,6 @@ impl<'a> Iterator for Lexer<'a> {
         Some(Token::new(TokenKind::Eof, String::new(), self.loc.clone()))
     }
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -290,7 +297,10 @@ mod tests {
         assert_eq!(tokens.len(), 2); // string token + EOF
         assert_eq!(tokens[0].kind, TokenKind::String);
         assert_eq!(tokens[0].lexeme, "\"hello world\"");
-        assert_eq!(tokens[0].literal, Some(TokenLiteral::String("hello world".to_string())));
+        assert_eq!(
+            tokens[0].literal,
+            Some(TokenLiteral::String("hello world".to_string()))
+        );
     }
 
     #[test]
@@ -298,11 +308,11 @@ mod tests {
         let source = "123 123.456";
         let tokens: Vec<Token> = Lexer::new(source).collect();
 
-        assert_eq!(tokens.len(), 3);  // Two numbers + EOF
+        assert_eq!(tokens.len(), 3); // Two numbers + EOF
         assert_eq!(tokens[0].kind, TokenKind::Number);
         assert_eq!(tokens[0].lexeme, "123");
         assert_eq!(tokens[0].literal, Some(TokenLiteral::Number(123.0)));
-        
+
         assert_eq!(tokens[1].kind, TokenKind::Number);
         assert_eq!(tokens[1].lexeme, "123.456");
         assert_eq!(tokens[1].literal, Some(TokenLiteral::Number(123.456)));
@@ -332,8 +342,8 @@ mod tests {
     fn test_identifiers() {
         let source = "foo bar baz";
         let tokens: Vec<Token> = Lexer::new(source).collect();
-        
-        assert_eq!(tokens.len(), 4);  // Three identifiers + EOF
+
+        assert_eq!(tokens.len(), 4); // Three identifiers + EOF
         for i in 0..3 {
             assert_eq!(tokens[i].kind, TokenKind::Identifier);
         }
@@ -357,4 +367,3 @@ mod tests {
         assert_eq!(tokens[0].kind, TokenKind::Print);
     }
 }
-

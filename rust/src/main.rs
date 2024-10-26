@@ -34,7 +34,7 @@ fn interpret_from_file(filename: &str) -> bool {
         Ok(source) => {
             let mut interp = Interpreter::new();
             interpret(&mut interp, &source)
-        },
+        }
         Err(error) => {
             eprintln!("Error reading file: {}", error);
             false
@@ -81,4 +81,3 @@ fn main() {
 
     std::process::exit(if result { 0 } else { -1 });
 }
-

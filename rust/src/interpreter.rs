@@ -30,25 +30,25 @@ impl Value {
             Value::Number(n) => {
                 let s = n.to_string();
                 if s.ends_with(".0") {
-                    s[..s.len()-2].to_string()
+                    s[..s.len() - 2].to_string()
                 } else {
                     s
                 }
-            },
+            }
             Value::String(s) => s.clone(),
             Value::Bool(b) => b.to_string(),
             Value::Nil => "nil".to_string(),
         }
     }
 
-    pub fn as_f64(&self) -> Result<f64,String> {
+    pub fn as_f64(&self) -> Result<f64, String> {
         match self {
             Value::Number(n) => Ok(*n),
             _ => Err("Value is not a number".to_string()),
         }
     }
 
-    pub fn evaluate_binary_operation(&self, op: &TokenKind, rhs: &Self) -> Result<Self,String> {
+    pub fn evaluate_binary_operation(&self, op: &TokenKind, rhs: &Self) -> Result<Self, String> {
         use Value::*;
 
         match op {
@@ -66,11 +66,11 @@ impl Value {
             },
             TokenKind::Slash => match (self, rhs) {
                 (Number(n1), Number(n2)) => Ok(Number(n1 / n2)),
-                (_,_) => Err("Operands must be two numbers.".to_string()),
+                (_, _) => Err("Operands must be two numbers.".to_string()),
             },
             TokenKind::Star => match (self, rhs) {
                 (Number(n1), Number(n2)) => Ok(Number(n1 * n2)),
-                (_,_) => Err("Operands must be two numbers.".to_string()),
+                (_, _) => Err("Operands must be two numbers.".to_string()),
             },
             _ => Err("Unexpected operator in binary operation".to_string()),
         }
@@ -92,7 +92,7 @@ struct Callable {
 
 #[derive(Clone)]
 enum CallableKind {
-    BuiltIn(Rc<dyn Fn(&mut Interpreter, &Vec<Value>) -> Result<Value,String>>),
+    BuiltIn(Rc<dyn Fn(&mut Interpreter, &Vec<Value>) -> Result<Value, String>>),
     User(UserFunction),
 }
 
@@ -107,7 +107,7 @@ impl Callable {
 
     pub fn new_built_in_function<F>(arity: usize, repr: String, func: F) -> Self
     where
-        F: Fn(&mut Interpreter, &Vec<Value>) -> Result<Value,String> + 'static,
+        F: Fn(&mut Interpreter, &Vec<Value>) -> Result<Value, String> + 'static,
     {
         Self {
             arity,
@@ -116,7 +116,7 @@ impl Callable {
         }
     }
 
-    pub fn call(&self, interp: &mut Interpreter, arguments: &Vec<Value>) -> Result<Value,String> {
+    pub fn call(&self, interp: &mut Interpreter, arguments: &Vec<Value>) -> Result<Value, String> {
         match &self.func {
             CallableKind::BuiltIn(f) => f(interp, arguments),
             CallableKind::User(f) => f.call(interp, arguments),
@@ -138,10 +138,8 @@ impl PartialEq for Callable {
             (CallableKind::User(a), CallableKind::User(b)) => {
                 // compare raw pointers to FunctionDecl
                 a.decl == b.decl
-            },
-            (CallableKind::BuiltIn(a), CallableKind::BuiltIn(b)) => {
-                Rc::ptr_eq(a,b)
-            },
+            }
+            (CallableKind::BuiltIn(a), CallableKind::BuiltIn(b)) => Rc::ptr_eq(a, b),
             _ => false,
         }
     }
@@ -176,7 +174,7 @@ impl Environment {
         }))
     }
 
-    fn get(&self, name: &Token) -> Result<Value,String> {
+    fn get(&self, name: &Token) -> Result<Value, String> {
         if let Some(value) = self.values.get(&name.lexeme) {
             Ok(value.clone())
         } else if let Some(enclosing) = &self.enclosing {
@@ -186,20 +184,18 @@ impl Environment {
         }
     }
 
-    fn put(&mut self, name: &Token, value: &Value) -> Result<(),String> {
+    fn put(&mut self, name: &Token, value: &Value) -> Result<(), String> {
         if self.values.contains_key(&name.lexeme) {
             self.values.insert(name.lexeme.clone(), value.clone());
             Ok(())
-        }
-        else if let Some(enclosing) = &mut self.enclosing {
+        } else if let Some(enclosing) = &mut self.enclosing {
             enclosing.borrow_mut().put(name, value)
-        }
-        else {
+        } else {
             Err(format!("Undefined variable '{}'.", &name.lexeme))
         }
     }
 
-    fn define(&mut self, name: &Token, value: &Value) -> Result<(),String> {
+    fn define(&mut self, name: &Token, value: &Value) -> Result<(), String> {
         if self.values.contains_key(&name.lexeme) {
             Err(format!("Variable '{}' is already defined.", &name.lexeme))
         } else {
@@ -211,22 +207,22 @@ impl Environment {
 
 impl std::fmt::Debug for Environment {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-      if let Some(enclosing) = &self.enclosing {
-          write!(f, "{:?}", enclosing.borrow())?;
-      }
+        if let Some(enclosing) = &self.enclosing {
+            write!(f, "{:?}", enclosing.borrow())?;
+        }
 
-      for (name,value) in &self.values {
-          writeln!(f, "{} : {}", name, value)?;
-      }
+        for (name, value) in &self.values {
+            writeln!(f, "{} : {}", name, value)?;
+        }
 
-      Ok(())
+        Ok(())
     }
 }
 
 #[derive(Debug, Clone)]
 struct UserFunction {
-    decl : *const FunctionDeclaration,
-    closure : Shared<Environment>,
+    decl: *const FunctionDeclaration,
+    closure: Shared<Environment>,
 }
 
 impl UserFunction {
@@ -234,7 +230,7 @@ impl UserFunction {
         UserFunction { decl, closure }
     }
 
-    pub fn call(&self, interpreter: &mut Interpreter, args: &Vec<Value>) -> Result<Value,String> {
+    pub fn call(&self, interpreter: &mut Interpreter, args: &Vec<Value>) -> Result<Value, String> {
         // create a new environment for the function call
         let env = Environment::new_shared_with_enclosing(self.closure.clone());
 
@@ -247,28 +243,31 @@ impl UserFunction {
         }
 
         interpreter.with_environment(env, |interpreter| {
-          match interpreter.interpret_block_statement(&decl.body) {
-              Ok(ControlFlow::Break(return_value)) => Ok(return_value),
-              Ok(ControlFlow::Continue(())) => Err("UserFunction body completed without a return value.".to_string()),
-              Err(e) => Err(e),
-          }
+            match interpreter.interpret_block_statement(&decl.body) {
+                Ok(ControlFlow::Break(return_value)) => Ok(return_value),
+                Ok(ControlFlow::Continue(())) => {
+                    Err("UserFunction body completed without a return value.".to_string())
+                }
+                Err(e) => Err(e),
+            }
         })
     }
 }
 
 pub struct Interpreter {
-    current_environment : Shared<Environment>,
+    current_environment: Shared<Environment>,
 }
 
 impl Interpreter {
     pub fn new() -> Self {
         Interpreter {
-            current_environment : Environment::new_shared(),
+            current_environment: Environment::new_shared(),
         }
     }
 
     pub fn push_environment(&mut self) {
-        self.current_environment = Environment::new_shared_with_enclosing(self.current_environment.clone());
+        self.current_environment =
+            Environment::new_shared_with_enclosing(self.current_environment.clone());
     }
 
     pub fn pop_environment(&mut self) {
@@ -279,7 +278,11 @@ impl Interpreter {
         self.current_environment = enclosing.expect("Can't pop global environment");
     }
 
-    pub fn with_environment<T>(&mut self, new_env: Shared<Environment>, f: impl FnOnce(&mut Self) -> T) -> T {
+    pub fn with_environment<T>(
+        &mut self,
+        new_env: Shared<Environment>,
+        f: impl FnOnce(&mut Self) -> T,
+    ) -> T {
         let mut temp_env = new_env;
         std::mem::swap(&mut self.current_environment, &mut temp_env);
         let result = f(self);
@@ -296,16 +299,32 @@ impl Interpreter {
         })
     }
 
-    fn interpret_grouping_expression(&mut self, expr: &GroupingExpression) -> Result<Value, String> {
+    fn interpret_grouping_expression(
+        &mut self,
+        expr: &GroupingExpression,
+    ) -> Result<Value, String> {
         self.interpret_expression(&*expr.expr)
     }
 
     fn interpret_logical_expression(&mut self, expr: &LogicalExpression) -> Result<Value, String> {
         let left = self.interpret_expression(&*expr.left_expr)?;
         match expr.op.kind {
-            TokenKind::Or => if left.as_bool() { return Ok(left) },
-            TokenKind::And => if !left.as_bool() { return Ok(left) },
-            _ => return Err(format!("Unexpected '{}' in logical expression", expr.op.lexeme)) 
+            TokenKind::Or => {
+                if left.as_bool() {
+                    return Ok(left);
+                }
+            }
+            TokenKind::And => {
+                if !left.as_bool() {
+                    return Ok(left);
+                }
+            }
+            _ => {
+                return Err(format!(
+                    "Unexpected '{}' in logical expression",
+                    expr.op.lexeme
+                ))
+            }
         };
         return self.interpret_expression(&*expr.right_expr);
     }
@@ -325,7 +344,11 @@ impl Interpreter {
         };
 
         if call.arguments.len() != callee.arity() {
-            return Err(format!("Expected {} arguments but got {}.", callee.arity(), call.arguments.len()));
+            return Err(format!(
+                "Expected {} arguments but got {}.",
+                callee.arity(),
+                call.arguments.len()
+            ));
         }
 
         let mut arguments = Vec::new();
@@ -349,9 +372,14 @@ impl Interpreter {
         self.current_environment.borrow().get(&var.name)
     }
 
-    fn interpret_assignment_expression(&mut self, expr: &AssignmentExpression) -> Result<Value, String> {
+    fn interpret_assignment_expression(
+        &mut self,
+        expr: &AssignmentExpression,
+    ) -> Result<Value, String> {
         let value = self.interpret_expression(&*expr.expr)?;
-        self.current_environment.borrow_mut().put(&expr.var.name, &value)?;
+        self.current_environment
+            .borrow_mut()
+            .put(&expr.var.name, &value)?;
         Ok(value)
     }
 
@@ -376,10 +404,13 @@ impl Interpreter {
         Ok(())
     }
 
-    fn interpret_block_statement(&mut self, block: &BlockStatement) -> Result<ControlFlow<Value>, String> {
+    fn interpret_block_statement(
+        &mut self,
+        block: &BlockStatement,
+    ) -> Result<ControlFlow<Value>, String> {
         self.push_environment();
 
-        let mut result = Ok(ControlFlow::Continue(())); 
+        let mut result = Ok(ControlFlow::Continue(()));
 
         for stmt in &block.statements {
             match self.interpret_statement(stmt) {
@@ -387,7 +418,7 @@ impl Interpreter {
                 Ok(ControlFlow::Break(value)) => {
                     result = Ok(ControlFlow::Break(value));
                     break;
-                },
+                }
                 Err(e) => {
                     result = Err(e);
                     break;
@@ -408,8 +439,14 @@ impl Interpreter {
     fn interpret_function_declaration(&mut self, decl: &FunctionDeclaration) -> Result<(), String> {
         let repr = format!("<fn {}>", decl.name.lexeme);
         let func = UserFunction::new(decl, self.current_environment.clone());
-        let callable = Value::Callable(Callable::new_user_function(decl.parameters.len(), repr, func));
-        self.current_environment.borrow_mut().define(&decl.name, &callable)
+        let callable = Value::Callable(Callable::new_user_function(
+            decl.parameters.len(),
+            repr,
+            func,
+        ));
+        self.current_environment
+            .borrow_mut()
+            .define(&decl.name, &callable)
     }
 
     fn interpret_print_statement(&mut self, stmt: &PrintStatement) -> Result<(), String> {
@@ -418,7 +455,10 @@ impl Interpreter {
         Ok(())
     }
 
-    fn interpret_return_statement(&mut self, stmt: &ReturnStatement) -> Result<ControlFlow<Value>, String> {
+    fn interpret_return_statement(
+        &mut self,
+        stmt: &ReturnStatement,
+    ) -> Result<ControlFlow<Value>, String> {
         let value = match &stmt.expr {
             Some(expr) => self.interpret_expression(expr)?,
             None => Value::Nil,
@@ -431,7 +471,9 @@ impl Interpreter {
             Some(expr) => self.interpret_expression(expr)?,
             None => Value::Nil,
         };
-        self.current_environment.borrow_mut().define(&decl.name, &value)
+        self.current_environment
+            .borrow_mut()
+            .define(&decl.name, &value)
     }
 
     fn interpret_statement(&mut self, stmt: &Statement) -> Result<ControlFlow<Value>, String> {
@@ -448,7 +490,8 @@ impl Interpreter {
                 Statement::Print(print) => self.interpret_print_statement(print),
                 Statement::Return(_) => Err("Impossible statement".to_string()),
                 Statement::VarDecl(var) => self.interpret_variable_declaration(var),
-            }.map(|_| ControlFlow::Continue(()))
+            }
+            .map(|_| ControlFlow::Continue(())),
         }
     }
 
@@ -459,4 +502,3 @@ impl Interpreter {
         Ok(())
     }
 }
-

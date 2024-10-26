@@ -118,4 +118,3 @@ pub enum Statement {
 pub struct Program {
     pub statements: Vec<Statement>,
 }
-
