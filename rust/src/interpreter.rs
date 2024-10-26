@@ -1,17 +1,18 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::ops::ControlFlow;
 use std::rc::Rc;
 
 use crate::syntax::*;
 use crate::token::*;
 
 #[derive(Clone, Debug, PartialEq)]
-pub enum Value {
+enum Value {
+    Callable(Callable),
     Bool(bool),
     Nil,
     Number(f64),
     String(String),
-    // XXX or Callable, eventually
 }
 
 impl Value {
@@ -25,6 +26,7 @@ impl Value {
 
     pub fn as_string(&self) -> String {
         match self {
+            Value::Callable(c) => c.to_string(),
             Value::Number(n) => {
                 let s = n.to_string();
                 if s.ends_with(".0") {
@@ -81,8 +83,78 @@ impl std::fmt::Display for Value {
     }
 }
 
-#[derive(Debug, Clone)]
-struct Environment {
+#[derive(Clone)]
+struct Callable {
+    arity: usize,
+    repr: String,
+    func: CallableKind,
+}
+
+#[derive(Clone)]
+enum CallableKind {
+    BuiltIn(Rc<dyn Fn(&mut Interpreter, &Vec<Value>) -> Result<Value,String>>),
+    User(UserFunction),
+}
+
+impl Callable {
+    pub fn new_user_function(arity: usize, repr: String, func: UserFunction) -> Self {
+        Self {
+            arity,
+            repr,
+            func: CallableKind::User(func),
+        }
+    }
+
+    pub fn new_built_in_function<F>(arity: usize, repr: String, func: F) -> Self
+    where
+        F: Fn(&mut Interpreter, &Vec<Value>) -> Result<Value,String> + 'static,
+    {
+        Self {
+            arity,
+            repr,
+            func: CallableKind::BuiltIn(Rc::new(func)),
+        }
+    }
+
+    pub fn call(&self, interp: &mut Interpreter, arguments: &Vec<Value>) -> Result<Value,String> {
+        match &self.func {
+            CallableKind::BuiltIn(f) => f(interp, arguments),
+            CallableKind::User(f) => f.call(interp, arguments),
+        }
+    }
+
+    pub fn arity(&self) -> usize {
+        self.arity
+    }
+
+    pub fn to_string(&self) -> String {
+        self.repr.clone()
+    }
+}
+
+impl PartialEq for Callable {
+    fn eq(&self, other: &Self) -> bool {
+        match (&self.func, &other.func) {
+            (CallableKind::User(a), CallableKind::User(b)) => {
+                // compare raw pointers to FunctionDecl
+                a.decl == b.decl
+            },
+            (CallableKind::BuiltIn(a), CallableKind::BuiltIn(b)) => {
+                Rc::ptr_eq(a,b)
+            },
+            _ => false,
+        }
+    }
+}
+
+impl std::fmt::Debug for Callable {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "{}", self.repr)
+    }
+}
+
+#[derive(Clone)]
+pub struct Environment {
     enclosing: Option<Rc<RefCell<Environment>>>,
     values: HashMap<String, Value>,
 }
@@ -135,6 +207,53 @@ impl Environment {
     }
 }
 
+impl std::fmt::Debug for Environment {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+      if let Some(enclosing) = &self.enclosing {
+          write!(f, "{:?}", enclosing.borrow())?;
+      }
+
+      for (name,value) in &self.values {
+          writeln!(f, "{} : {}", name, value)?;
+      }
+
+      Ok(())
+    }
+}
+
+#[derive(Debug, Clone)]
+struct UserFunction {
+    decl : *const FunctionDeclaration,
+    closure : Rc<RefCell<Environment>>,
+}
+
+impl UserFunction {
+    pub fn new(decl: &FunctionDeclaration, closure: Rc<RefCell<Environment>>) -> Self {
+        UserFunction { decl, closure }
+    }
+
+    pub fn call(&self, interpreter: &mut Interpreter, args: &Vec<Value>) -> Result<Value,String> {
+        // create a new environment for the function call
+        let env = Rc::new(RefCell::new(Environment::new_with_enclosing(self.closure.clone())));
+
+        // SAFETY: we know the FunctionDeclaration outlives the Interpreter
+        let decl = unsafe { &*self.decl };
+
+        // bind arguments to parameters
+        for (param, arg) in decl.parameters.iter().zip(args.iter()) {
+            env.borrow_mut().define(param, arg)?;
+        }
+
+        interpreter.with_environment(env, |interpreter| {
+          match interpreter.interpret_block_statement(&decl.body) {
+              Ok(ControlFlow::Break(return_value)) => Ok(return_value),
+              Ok(ControlFlow::Continue(())) => Err("UserFunction body completed without a return value.".to_string()),
+              Err(e) => Err(e),
+          }
+        })
+    }
+}
+
 pub struct Interpreter {
     current_environment : Rc<RefCell<Environment>>,
 }
@@ -158,6 +277,14 @@ impl Interpreter {
             current.enclosing.clone()
         };
         self.current_environment = enclosing.expect("Can't pop global environment");
+    }
+
+    pub fn with_environment<T>(&mut self, new_env: Rc<RefCell<Environment>>, f: impl FnOnce(&mut Self) -> T) -> T {
+        let mut temp_env = new_env;
+        std::mem::swap(&mut self.current_environment, &mut temp_env);
+        let result = f(self);
+        std::mem::swap(&mut self.current_environment, &mut temp_env);
+        result
     }
 
     fn interpret_literal(&self, lit: &Literal) -> Result<Value, String> {
@@ -189,6 +316,26 @@ impl Interpreter {
         lhs.evaluate_binary_operation(&expr.op.kind, &rhs)
     }
 
+    fn interpret_call_expression(&mut self, call: &CallExpression) -> Result<Value, String> {
+        let value = self.interpret_expression(&*call.callee)?;
+
+        let callee = match &value {
+            Value::Callable(callee) => callee,
+            _ => return Err("Can only call functions and classes.".to_string()),
+        };
+
+        if call.arguments.len() != callee.arity() {
+            return Err(format!("Expected {} arguments but got {}.", callee.arity(), call.arguments.len()));
+        }
+
+        let mut arguments = Vec::new();
+        for arg in &call.arguments {
+            arguments.push(self.interpret_expression(&arg)?);
+        }
+
+        callee.call(self, &arguments)
+    }
+
     fn interpret_unary_expression(&mut self, expr: &UnaryExpression) -> Result<Value, String> {
         let value = self.interpret_expression(&*expr.expr)?;
         match expr.op.kind {
@@ -212,6 +359,7 @@ impl Interpreter {
         match expr {
             Expression::Assignment(expr) => self.interpret_assignment_expression(expr),
             Expression::Binary(expr) => self.interpret_binary_expression(expr),
+            Expression::Call(expr) => self.interpret_call_expression(expr),
             Expression::Grouping(g) => self.interpret_grouping_expression(g),
             Expression::Literal(l) => self.interpret_literal(l),
             Expression::Logical(expr) => self.interpret_logical_expression(expr),
@@ -228,17 +376,24 @@ impl Interpreter {
         Ok(())
     }
 
-    fn interpret_block_statement(&mut self, block: &BlockStatement) -> Result<(), String> {
+    fn interpret_block_statement(&mut self, block: &BlockStatement) -> Result<ControlFlow<Value>, String> {
         self.push_environment();
 
-        let mut result = Ok(());
+        let mut result = Ok(ControlFlow::Continue(())); 
 
         for stmt in &block.statements {
-            if let Err(e) = self.interpret_statement(stmt) {
-                result = Err(e);
-                break;
+            match self.interpret_statement(stmt) {
+                Ok(ControlFlow::Continue(())) => continue,
+                Ok(ControlFlow::Break(value)) => {
+                    result = Ok(ControlFlow::Break(value));
+                    break;
+                },
+                Err(e) => {
+                    result = Err(e);
+                    break;
+                }
             }
-        };
+        }
 
         self.pop_environment();
 
@@ -250,10 +405,25 @@ impl Interpreter {
         Ok(())
     }
 
+    fn interpret_function_declaration(&mut self, decl: &FunctionDeclaration) -> Result<(), String> {
+        let repr = format!("<fn {}>", decl.name.lexeme);
+        let func = UserFunction::new(decl, self.current_environment.clone());
+        let callable = Value::Callable(Callable::new_user_function(decl.parameters.len(), repr, func));
+        self.current_environment.borrow_mut().define(&decl.name, &callable)
+    }
+
     fn interpret_print_statement(&mut self, stmt: &PrintStatement) -> Result<(), String> {
         let val = self.interpret_expression(&stmt.expr)?;
         println!("{}", val);
         Ok(())
+    }
+
+    fn interpret_return_statement(&mut self, stmt: &ReturnStatement) -> Result<ControlFlow<Value>, String> {
+        let value = match &stmt.expr {
+            Some(expr) => self.interpret_expression(expr)?,
+            None => Value::Nil,
+        };
+        Ok(ControlFlow::Break(value))
     }
 
     fn interpret_variable_declaration(&mut self, decl: &VariableDeclaration) -> Result<(), String> {
@@ -264,19 +434,27 @@ impl Interpreter {
         self.current_environment.borrow_mut().define(&decl.name, &value)
     }
 
-    fn interpret_statement(&mut self, stmt: &Statement) -> Result<(), String> {
+    fn interpret_statement(&mut self, stmt: &Statement) -> Result<ControlFlow<Value>, String> {
         match stmt {
-            Statement::Assert(stmt) => self.interpret_assert_statement(stmt),
-            Statement::Block(stmt) => self.interpret_block_statement(stmt),
-            Statement::Expr(stmt) => self.interpret_expression_statement(stmt),
-            Statement::Print(stmt) => self.interpret_print_statement(stmt),
-            Statement::VarDecl(decl) => self.interpret_variable_declaration(decl),
+            Statement::Block(block) => self.interpret_block_statement(block),
+            Statement::Return(ret) => self.interpret_return_statement(ret),
+
+            // map the results of other statements to ControlFlow::Continue
+            _ => match stmt {
+                Statement::Block(_) => Err("Impossible statement".to_string()),
+                Statement::Assert(assert) => self.interpret_assert_statement(assert),
+                Statement::Expr(expr) => self.interpret_expression_statement(expr),
+                Statement::FunDecl(fun) => self.interpret_function_declaration(fun),
+                Statement::Print(print) => self.interpret_print_statement(print),
+                Statement::Return(_) => Err("Impossible statement".to_string()),
+                Statement::VarDecl(var) => self.interpret_variable_declaration(var),
+            }.map(|_| ControlFlow::Continue(()))
         }
     }
 
     pub fn interpret_program(&mut self, prog: &Program) -> Result<(), String> {
         for stmt in &prog.statements {
-            self.interpret_statement(stmt)?
+            self.interpret_statement(stmt)?;
         }
         Ok(())
     }

@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+restore_macros = { path = "./restore_macros" }
 
 [dev-dependencies]
 pretty_assertions = "1.3"

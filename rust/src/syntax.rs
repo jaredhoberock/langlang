@@ -27,6 +27,13 @@ pub struct BinaryExpression {
 }
 
 #[derive(Debug)]
+pub struct CallExpression {
+    pub callee: Box<Expression>,
+    pub arguments: Vec<Expression>,
+    pub closing_paren: Token,
+}
+
+#[derive(Debug)]
 pub struct GroupingExpression {
     pub lparen: Token,
     pub expr: Box<Expression>,
@@ -50,6 +57,7 @@ pub struct UnaryExpression {
 pub enum Expression {
     Assignment(AssignmentExpression),
     Binary(BinaryExpression),
+    Call(CallExpression),
     Grouping(GroupingExpression),
     Literal(Literal),
     Logical(LogicalExpression),
@@ -73,8 +81,20 @@ pub struct ExpressionStatement {
 }
 
 #[derive(Debug)]
+pub struct FunctionDeclaration {
+    pub name: Token,
+    pub parameters: Vec<Token>,
+    pub body: BlockStatement,
+}
+
+#[derive(Debug)]
 pub struct PrintStatement {
     pub expr: Expression,
+}
+
+#[derive(Debug)]
+pub struct ReturnStatement {
+    pub expr: Option<Expression>,
 }
 
 #[derive(Debug)]
@@ -88,7 +108,9 @@ pub enum Statement {
     Assert(AssertStatement),
     Block(BlockStatement),
     Expr(ExpressionStatement),
+    FunDecl(FunctionDeclaration),
     Print(PrintStatement),
+    Return(ReturnStatement),
     VarDecl(VariableDeclaration),
 }
 

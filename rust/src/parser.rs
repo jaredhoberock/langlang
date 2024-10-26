@@ -1,6 +1,9 @@
 use crate::token::*;
 use crate::syntax::*;
 
+extern crate restore_macros;
+use restore_macros::restore_self_on_err;
+
 pub struct ParseError {
     message: String,
     remaining_len: usize,
@@ -50,6 +53,7 @@ impl std::fmt::Display for ParseError {
     }
 }
 
+#[derive(Clone)]
 struct Parser<'a> {
     remaining: &'a [Token],
 }
@@ -61,6 +65,15 @@ impl<'a> Parser<'a> {
         }
     }
 
+    // almost all of the methods below use restore_self_on_err
+    // to reset the state of the Parser (i.e., the remaining unparsed input)
+    // back to its original state upon entering the method when
+    // these methods fail a parse
+    //
+    // this allows us to try to parse one alternative, automatically backtrack,
+    // try the next alternative, etc.
+
+    #[restore_self_on_err]
     fn token(&mut self, kind: TokenKind) -> Result<Token, ParseError> {
         if self.remaining.is_empty() || self.remaining[0].kind != kind {
             return Err(ParseError::new(format!("Expected '{}'", kind), self.remaining))
@@ -71,9 +84,8 @@ impl<'a> Parser<'a> {
         Ok(result)
     }
 
+    #[restore_self_on_err]
     fn either_token(&mut self, kind0: TokenKind, kind1: TokenKind) -> Result<Token, ParseError> {
-        let original_remaining = self.remaining;
-
         let tok0 = self.token(kind0);
         if tok0.is_ok() {
             return tok0;
@@ -83,8 +95,6 @@ impl<'a> Parser<'a> {
         if tok1.is_ok() {
             return tok1
         }
-
-        self.remaining = original_remaining;
 
         let errors = vec![
             tok0.unwrap_err(),
@@ -138,6 +148,7 @@ impl<'a> Parser<'a> {
     }
 
     // grouping_expression := '(' expression ')'
+    #[restore_self_on_err]
     fn grouping_expression(&mut self) -> Result<GroupingExpression, ParseError> {
         Ok(GroupingExpression{
             lparen : self.token(TokenKind::LeftParen)?, 
@@ -147,10 +158,8 @@ impl<'a> Parser<'a> {
     }
 
     // literal := number_literal | string_literal | 'true' | 'false' | 'nil'
+    #[restore_self_on_err]
     fn literal(&mut self) -> Result<Literal, ParseError> {
-        // note the original state of remaining
-        let original_remaining = self.remaining;
-
         let number = self.number_literal();
         if number.is_ok() {
             return number;
@@ -176,9 +185,6 @@ impl<'a> Parser<'a> {
             return nil;
         }
 
-        // restore state after failure
-        self.remaining = original_remaining;
-
         let errors = vec![
             number.unwrap_err(),
             string.unwrap_err(),
@@ -191,9 +197,8 @@ impl<'a> Parser<'a> {
     }
 
     // primary_expression := literal | grouping_expression | variable
+    #[restore_self_on_err]
     fn primary_expression(&mut self) -> Result<Expression, ParseError> {
-        let original_remaining = self.remaining;
-
         let literal = self.literal();
         if literal.is_ok() {
             return literal.map(Expression::Literal);
@@ -209,8 +214,6 @@ impl<'a> Parser<'a> {
             return var.map(Expression::Variable);
         }
 
-        self.remaining = original_remaining;
-
         let errors = vec![
             literal.unwrap_err(),
             grouping.unwrap_err(),
@@ -220,15 +223,69 @@ impl<'a> Parser<'a> {
         Err(ParseError::combine(errors))
     }
 
-    // call := primary_expression
+    // arguments := expression ( "," expression )*
+    #[restore_self_on_err]
+    fn arguments(&mut self) -> Result<Vec<Expression>, ParseError> {
+        let mut result = Vec::new();
+
+        loop {
+            if result.len() == 255 {
+                return Err(ParseError::new("Can't have more than 255 arguments".to_string(), self.remaining));
+            }
+
+            let err_fmt_str = if result.len() > 0 {
+                "{} after ',' in argument list"
+            } else {
+                "{}"
+            };
+
+            let expr = self.expression()
+                .map_err(ParseError::format_message(err_fmt_str))?;
+
+            result.push(expr);
+
+            // look for a comma to indicate another argument
+            if let Err(_) = self.token(TokenKind::Comma) {
+                break;
+            }
+        }
+
+        Ok(result)
+    }
+
+    // call := primary_expression ( "(" arguments? ")" )*
+    #[restore_self_on_err]
     fn call(&mut self) -> Result<Expression, ParseError> {
-        self.primary_expression()
+        let mut result = self.primary_expression()?;
+
+        loop {
+            // look for an open paren
+            if self.token(TokenKind::LeftParen).is_err() {
+                break;
+            }
+
+            if let Ok(closing_paren) = self.token(TokenKind::RightParen) {
+                let call_expr = CallExpression{callee: Box::new(result), arguments: Vec::new(), closing_paren};
+                result = Expression::Call(call_expr);
+                break;
+            }
+
+            let arguments = self.arguments()
+                .map_err(ParseError::format_message("{} after '('"))?;
+
+            let closing_paren = self.token(TokenKind::RightParen)
+                .map_err(ParseError::format_message("{} after arguments"))?;
+            
+            let call_expr = CallExpression{callee: Box::new(result), arguments, closing_paren};
+            result = Expression::Call(call_expr);
+        }
+
+        Ok(result)
     }
 
     // unary := ( "!" | "-" ) | call
+    #[restore_self_on_err]
     fn unary(&mut self) -> Result<Expression, ParseError> {
-        let original_remaining = self.remaining;
-
         if let Ok(op) = self.either_token(TokenKind::Bang, TokenKind::Minus) {
             let expr = UnaryExpression{
                 op : op,
@@ -236,12 +293,12 @@ impl<'a> Parser<'a> {
             };
             Ok(Expression::Unary(expr))
         } else {
-            self.remaining = original_remaining;
             self.call()
         }
     }
 
     // factor := unary ( ( "/" | "*" ) ) unary )*
+    #[restore_self_on_err]
     fn factor(&mut self) -> Result<Expression, ParseError> {
         let mut result = self.unary()?;
 
@@ -260,6 +317,7 @@ impl<'a> Parser<'a> {
     }
 
     // term := factor ( ( "-" | "+" ) factor )*
+    #[restore_self_on_err]
     fn term(&mut self) -> Result<Expression, ParseError> {
         let mut result = self.factor()?;
 
@@ -283,6 +341,7 @@ impl<'a> Parser<'a> {
     }
 
     // equality := comparison ( ( "!=" | "==" ) comparison )*
+    #[restore_self_on_err]
     fn equality(&mut self) -> Result<Expression, ParseError> {
         let mut result = self.comparison()?;
 
@@ -301,6 +360,7 @@ impl<'a> Parser<'a> {
     }
 
     // logical_and := equality ( "and" equality)*
+    #[restore_self_on_err]
     fn logical_and(&mut self) -> Result<Expression, ParseError> {
         let mut result = self.equality()?;
 
@@ -319,6 +379,7 @@ impl<'a> Parser<'a> {
     }
 
     // logical_or := logical_and ( "or" logical_and)*
+    #[restore_self_on_err]
     fn logical_or(&mut self) -> Result<Expression, ParseError> {
         let mut result = self.logical_and()?;
 
@@ -337,10 +398,9 @@ impl<'a> Parser<'a> {
     }
 
     // assignment := logical_or | variable "=" assignment
+    #[restore_self_on_err]
     fn assignment(&mut self) -> Result<Expression, ParseError> {
         let mut result = self.logical_or()?;
-
-        let original_remaining = self.remaining;
 
         if let Ok(_) = self.token(TokenKind::Equal) {
             if let Expression::Variable(var) = result {
@@ -353,9 +413,7 @@ impl<'a> Parser<'a> {
                 });
             }
             else {
-                let err = ParseError::new("Invalid assignment target".to_string(), self.remaining);
-                self.remaining = original_remaining;
-                return Err(err);
+                return Err(ParseError::new("Invalid assignment target".to_string(), self.remaining));
             }
         }
 
@@ -368,6 +426,7 @@ impl<'a> Parser<'a> {
     }
 
     // variable_declaration := "var" identifier ( "=" expression )? ";"
+    #[restore_self_on_err]
     fn variable_declaration(&mut self) -> Result<Statement, ParseError> {
         let _var = self.token(TokenKind::Var)?;
         let name = self.identifier()?;
@@ -384,6 +443,7 @@ impl<'a> Parser<'a> {
     }
 
     // assert_statement := "assert" expression ";"
+    #[restore_self_on_err]
     fn assert_statement(&mut self) -> Result<Statement, ParseError> {
         let _assert = self.token(TokenKind::Assert)?;
         let expr = self.expression()?;
@@ -392,7 +452,8 @@ impl<'a> Parser<'a> {
     }
 
     // block_statement := "{" ( declaration )* "}"
-    fn block_statement(&mut self) -> Result<Statement, ParseError> {
+    #[restore_self_on_err]
+    fn block_statement(&mut self) -> Result<BlockStatement, ParseError> {
         let _lbrace = self.token(TokenKind::LeftBrace)
             .map_err(ParseError::format_message("{} before block"))?;
 
@@ -407,10 +468,11 @@ impl<'a> Parser<'a> {
             statements.push(stmt);
         }
 
-        Ok(Statement::Block(BlockStatement{statements}))
+        Ok(BlockStatement{statements})
     }
 
     // expression_statement := expression ";"
+    #[restore_self_on_err]
     fn expression_statement(&mut self) -> Result<Statement, ParseError> {
         let expr = self.expression()?;
         let _semi = self.token(TokenKind::Semicolon)?;
@@ -418,6 +480,7 @@ impl<'a> Parser<'a> {
     }
 
     // print_statement := "print" expression ";"
+    #[restore_self_on_err]
     fn print_statement(&mut self) -> Result<Statement, ParseError> {
         let _print = self.token(TokenKind::Print)?;
         let expr = self.expression()?;
@@ -425,10 +488,21 @@ impl<'a> Parser<'a> {
         Ok(Statement::Print(PrintStatement{expr}))
     }
 
-    // statement := assert_statement | block_statement | expression_statement | print_statement
-    fn statement(&mut self) -> Result<Statement, ParseError> {
-        let original_remaining = self.remaining;
+    // return_statement := "return" expression? ";"
+    #[restore_self_on_err]
+    fn return_statement(&mut self) -> Result<Statement, ParseError> {
+        self.token(TokenKind::Return)?;
+        let mut expr = None;
+        if let Ok(e) = self.expression() {
+            expr = Some(e);
+        }
+        self.token(TokenKind::Semicolon)?;
+        Ok(Statement::Return(ReturnStatement{expr}))
+    }
 
+    // statement := assert_statement | block_statement | expression_statement | print_statement | return_statement
+    #[restore_self_on_err]
+    fn statement(&mut self) -> Result<Statement, ParseError> {
         let assert = self.assert_statement();
         if assert.is_ok() {
             return assert;
@@ -436,7 +510,7 @@ impl<'a> Parser<'a> {
 
         let block = self.block_statement();
         if block.is_ok() {
-            return block;
+            return block.map(Statement::Block);
         }
 
         let expr_stmt = self.expression_statement();
@@ -449,22 +523,62 @@ impl<'a> Parser<'a> {
             return print;
         }
 
-        // restore state after failure
-        self.remaining = original_remaining;
+        let ret = self.return_statement();
+        if ret.is_ok() {
+            return ret;
+        }
 
         let errors = vec![
             assert.unwrap_err(),
             block.unwrap_err(),
             expr_stmt.unwrap_err(),
             print.unwrap_err(),
+            ret.unwrap_err(),
         ];
 
         Err(ParseError::combine(errors))
     }
 
-    // declaration := variable_declaration | statement
+    // parameters := identifier ( "," identifier )*
+    #[restore_self_on_err]
+    fn parameters(&mut self) -> Result<Vec<Token>, ParseError> {
+        let mut params = vec![self.identifier()?];
+
+        while self.token(TokenKind::Comma).is_ok() {
+            let param = self.identifier()
+                .map_err(ParseError::format_message("{} in function parameter list"))?;
+            params.push(param);
+        }
+
+        Ok(params)
+    }
+
+    // function_declaration := "fun" identifier "(" parameters? ")" block_statement
+    #[restore_self_on_err]
+    fn function_declaration(&mut self) -> Result<Statement, ParseError> {
+        let _fun = self.token(TokenKind::Fun)
+            .map_err(ParseError::format_message("{} before function name"))?;
+        let name = self.identifier()?;
+        let _lparen = self.token(TokenKind::LeftParen)?;
+
+        let mut parameters = Vec::new();
+        if let Ok(params) = self.parameters() {
+            parameters = params;
+        }
+
+        let _rparen = self.token(TokenKind::RightParen)?;
+        let body = self.block_statement()?;
+
+        Ok(Statement::FunDecl(FunctionDeclaration{name,parameters,body}))
+    }
+
+    // declaration := function_declaration | variable_declaration | statement
+    #[restore_self_on_err]
     fn declaration(&mut self) -> Result<Statement, ParseError> {
-        let original_remaining = self.remaining;
+        let fun_decl = self.function_declaration();
+        if fun_decl.is_ok() {
+            return fun_decl;
+        }
 
         let var_decl = self.variable_declaration();
         if var_decl.is_ok() {
@@ -476,9 +590,8 @@ impl<'a> Parser<'a> {
             return stmt;
         }
 
-        self.remaining = original_remaining;
-
         let errors = vec![
+            fun_decl.unwrap_err(),
             var_decl.unwrap_err(),
             stmt.unwrap_err(),
         ];
@@ -487,6 +600,7 @@ impl<'a> Parser<'a> {
     }
 
     // program := declaration* EOF
+    #[restore_self_on_err]
     fn program(&mut self) -> Result<Program, ParseError> {
         let mut stmts = Vec::new();
 
