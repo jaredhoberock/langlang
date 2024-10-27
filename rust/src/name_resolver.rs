@@ -208,6 +208,11 @@ impl NameResolver {
         self.define(&decl.name)
     }
 
+    fn resolve_while_statement(&mut self, stmt: &WhileStatement) -> Result<(), String> {
+        self.resolve_expression(&stmt.condition)?;
+        self.resolve_statement(&*stmt.body)
+    }
+
     fn resolve_statement(&mut self, stmt: &Statement) -> Result<(), String> {
         match stmt {
             Statement::Assert(a) => self.resolve_assert_statement(a),
@@ -218,6 +223,7 @@ impl NameResolver {
             Statement::Print(p) => self.resolve_print_statement(p),
             Statement::Return(r) => self.resolve_return_statement(r),
             Statement::VarDecl(v) => self.resolve_variable_declaration(v),
+            Statement::While(w) => self.resolve_while_statement(w),
         }
     }
 

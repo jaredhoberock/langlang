@@ -524,6 +524,13 @@ impl Interpreter {
             .define(&decl.name, &value)
     }
 
+    fn interpret_while_statement(&mut self, stmt: &WhileStatement) -> Result<(), String> {
+        while self.interpret_expression(&stmt.condition)?.as_bool() {
+            self.interpret_statement(&*stmt.body)?;
+        }
+        Ok(())
+    }
+
     fn interpret_statement(&mut self, stmt: &Statement) -> Result<ControlFlow<Value>, String> {
         match stmt {
             Statement::Block(block) => self.interpret_block_statement(block),
@@ -539,6 +546,7 @@ impl Interpreter {
                 Statement::Print(print) => self.interpret_print_statement(print),
                 Statement::Return(_) => Err("Impossible statement".to_string()),
                 Statement::VarDecl(var) => self.interpret_variable_declaration(var),
+                Statement::While(w) => self.interpret_while_statement(w),
             }
             .map(|_| ControlFlow::Continue(())),
         }

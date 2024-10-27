@@ -111,6 +111,12 @@ pub struct VariableDeclaration {
 }
 
 #[derive(Debug)]
+pub struct WhileStatement {
+    pub condition: Expression,
+    pub body: Box<Statement>,
+}
+
+#[derive(Debug)]
 pub enum Statement {
     Assert(AssertStatement),
     Block(BlockStatement),
@@ -120,6 +126,7 @@ pub enum Statement {
     Print(PrintStatement),
     Return(ReturnStatement),
     VarDecl(VariableDeclaration),
+    While(WhileStatement),
 }
 
 #[derive(Debug)]

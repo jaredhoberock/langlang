@@ -558,7 +558,17 @@ impl<'a> Parser<'a> {
         Ok(Statement::Return(ReturnStatement { expr }))
     }
 
-    // statement := assert_statement | block_statement | expression_statement | if_statement | print_statement | return_statement
+    // while_statement := "while" "(" condition ")" statement
+    fn while_statement(&mut self) -> Result<Statement, ParseError> {
+        let _while = self.token(TokenKind::While)?;
+        let _lparen = self.token(TokenKind::LeftParen)?;
+        let condition = self.expression()?;
+        let _rparen = self.token(TokenKind::RightParen)?;
+        let body = Box::new(self.statement()?);
+        Ok(Statement::While(WhileStatement { condition, body }))
+    }
+
+    // statement := assert_statement | block_statement | expression_statement | if_statement | print_statement | return_statement | while_statement
     #[restore_self_on_err]
     fn statement(&mut self) -> Result<Statement, ParseError> {
         let assert = self.assert_statement();
@@ -591,6 +601,11 @@ impl<'a> Parser<'a> {
             return ret;
         }
 
+        let while_ = self.while_statement();
+        if while_.is_ok() {
+            return while_;
+        }
+
         let errors = vec![
             assert.unwrap_err(),
             block.unwrap_err(),
@@ -598,6 +613,7 @@ impl<'a> Parser<'a> {
             if_stmt.unwrap_err(),
             print.unwrap_err(),
             ret.unwrap_err(),
+            while_.unwrap_err(),
         ];
 
         Err(ParseError::combine(errors))
