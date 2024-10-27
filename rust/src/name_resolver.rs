@@ -178,6 +178,19 @@ impl NameResolver {
         })
     }
 
+    fn resolve_for_statement(&mut self, stmt: &ForStatement) -> Result<(), String> {
+        if let Some(initializer) = &stmt.initializer {
+            self.resolve_statement(&*initializer)?;
+        }
+        if let Some(condition) = &stmt.condition {
+            self.resolve_expression(&*condition)?;
+        }
+        if let Some(increment) = &stmt.increment {
+            self.resolve_expression(&*increment)?;
+        }
+        self.resolve_statement(&*stmt.body)
+    }
+
     fn resolve_function_declaration(&mut self, decl: &FunctionDeclaration) -> Result<(), String> {
         self.declare(&decl.name)?;
         self.define(&decl.name)?;
@@ -218,6 +231,7 @@ impl NameResolver {
             Statement::Assert(a) => self.resolve_assert_statement(a),
             Statement::Block(b) => self.resolve_block_statement(b),
             Statement::Expr(e) => self.resolve_expression_statement(e),
+            Statement::For(f) => self.resolve_for_statement(f),
             Statement::FunDecl(f) => self.resolve_function_declaration(f),
             Statement::If(i) => self.resolve_if_statement(i),
             Statement::Print(p) => self.resolve_print_statement(p),

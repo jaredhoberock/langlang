@@ -81,6 +81,14 @@ pub struct ExpressionStatement {
 }
 
 #[derive(Debug)]
+pub struct ForStatement {
+    pub initializer: Option<Box<Statement>>,
+    pub condition: Option<Expression>,
+    pub increment: Option<Expression>,
+    pub body: Box<Statement>,
+}
+
+#[derive(Debug)]
 pub struct FunctionDeclaration {
     pub name: Token,
     pub parameters: Vec<Token>,
@@ -121,6 +129,7 @@ pub enum Statement {
     Assert(AssertStatement),
     Block(BlockStatement),
     Expr(ExpressionStatement),
+    For(ForStatement),
     FunDecl(FunctionDeclaration),
     If(IfStatement),
     Print(PrintStatement),

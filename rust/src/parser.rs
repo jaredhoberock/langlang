@@ -520,6 +520,42 @@ impl<'a> Parser<'a> {
         return Ok(Statement::Expr(ExpressionStatement { expr }));
     }
 
+    // for_statement := "for" "(" ( variable_declaration | expression_statement ) expression? ";" expression? ")" statement
+    #[restore_self_on_err]
+    fn for_statement(&mut self) -> Result<Statement, ParseError> {
+        let _for = self.token(TokenKind::For)
+            .map_err(ParseError::format_message("{} before for loop"))?;
+        let _lparen = self.token(TokenKind::LeftParen)
+            .map_err(ParseError::format_message("{} after 'for'"))?;
+
+        let mut initializer = None;
+        if let Ok(var_decl) = self.variable_declaration() {
+            initializer = Some(Box::new(var_decl));
+        } else if let Ok(expr_stmt) = self.expression_statement() {
+            initializer = Some(Box::new(expr_stmt));
+        }
+
+        let mut condition = None;
+        if let Ok(expr) = self.expression() {
+            condition = Some(expr);
+        }
+
+        let _semi = self.token(TokenKind::Semicolon)
+            .map_err(ParseError::format_message("{} after for loop condition"))?;
+
+        let mut increment = None;
+        if let Ok(incr) = self.expression() {
+            increment = Some(incr);
+        }
+
+        let _rparen = self.token(TokenKind::RightParen)
+            .map_err(ParseError::format_message("{} after for loop increment"))?;
+
+        let body = Box::new(self.statement()?);
+
+        Ok(Statement::For(ForStatement{initializer, condition, increment, body}))
+    }
+
     // if_statement := "if" "(" expression ")" statement ( "else" statement )?
     #[restore_self_on_err]
     fn if_statement(&mut self) -> Result<Statement, ParseError> {
@@ -568,7 +604,8 @@ impl<'a> Parser<'a> {
         Ok(Statement::While(WhileStatement { condition, body }))
     }
 
-    // statement := assert_statement | block_statement | expression_statement | if_statement | print_statement | return_statement | while_statement
+    // statement := assert_statement | block_statement | expression_statement | for_statement |
+    //              if_statement | print_statement | return_statement | while_statement
     #[restore_self_on_err]
     fn statement(&mut self) -> Result<Statement, ParseError> {
         let assert = self.assert_statement();
@@ -584,6 +621,11 @@ impl<'a> Parser<'a> {
         let expr_stmt = self.expression_statement();
         if expr_stmt.is_ok() {
             return expr_stmt;
+        }
+
+        let for_stmt = self.for_statement();
+        if for_stmt.is_ok() {
+            return for_stmt;
         }
 
         let if_stmt = self.if_statement();
@@ -610,6 +652,7 @@ impl<'a> Parser<'a> {
             assert.unwrap_err(),
             block.unwrap_err(),
             expr_stmt.unwrap_err(),
+            for_stmt.unwrap_err(),
             if_stmt.unwrap_err(),
             print.unwrap_err(),
             ret.unwrap_err(),

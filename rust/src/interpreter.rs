@@ -277,9 +277,7 @@ impl UserFunction {
         interpreter.with_environment(env, |interpreter| {
             match interpreter.interpret_block_statement(&decl.body) {
                 Ok(ControlFlow::Break(return_value)) => Ok(return_value),
-                Ok(ControlFlow::Continue(())) => {
-                    Err("UserFunction body completed without a return value.".to_string())
-                }
+                Ok(ControlFlow::Continue(())) => Ok(Value::Nil),
                 Err(e) => Err(e),
             }
         })
@@ -299,11 +297,13 @@ impl Interpreter {
         }
     }
 
+    // XXX eliminate this
     fn push_environment(&mut self) {
         self.current_environment =
             Environment::new_shared_with_enclosing(self.current_environment.clone());
     }
 
+    // XXX eliminate this
     fn pop_environment(&mut self) {
         let enclosing = {
             let current = self.current_environment.borrow();
@@ -322,6 +322,14 @@ impl Interpreter {
         let result = f(self);
         std::mem::swap(&mut self.current_environment, &mut temp_env);
         result
+    }
+
+    fn with_enclosed_environment<T>(
+        &mut self,
+        f: impl FnOnce(&mut Self) -> T,
+    ) -> T {
+        let env = Environment::new_shared_with_enclosing(self.current_environment.clone());
+        self.with_environment(env, f)
     }
 
     fn interpret_literal(&self, lit: &Literal) -> Result<Value, String> {
@@ -456,7 +464,7 @@ impl Interpreter {
                 Ok(ControlFlow::Break(value)) => {
                     result = Ok(ControlFlow::Break(value));
                     break;
-                }
+                },
                 Err(e) => {
                     result = Err(e);
                     break;
@@ -474,6 +482,38 @@ impl Interpreter {
         Ok(())
     }
 
+    fn interpret_for_statement(&mut self, stmt: &ForStatement) -> Result<ControlFlow<Value>, String> {
+        self.with_enclosed_environment(|slf| {
+            let mut result = Ok(ControlFlow::Continue(()));
+
+            if let Some(initializer) = &stmt.initializer {
+                slf.interpret_statement(initializer)?;
+            }
+
+            while match &stmt.condition {
+                Some(condition) => slf.interpret_expression(&condition)?.as_bool(),
+                None => true,
+            } {
+                match slf.interpret_statement(&*stmt.body) {
+                    Ok(ControlFlow::Continue(())) => (),
+                    Ok(ControlFlow::Break(value)) => {
+                        result = Ok(ControlFlow::Break(value));
+                        break;
+                    },
+                    Err(e) => {
+                        result = Err(e);
+                        break;
+                    }
+                }
+
+                if let Some(increment) = &stmt.increment {
+                    slf.interpret_expression(&increment)?;
+                }
+            }
+            result
+        })
+    }
+
     fn interpret_function_declaration(&mut self, decl: &FunctionDeclaration) -> Result<(), String> {
         let repr = format!("<fn {}>", decl.name.lexeme);
         let func = UserFunction::new(decl, self.current_environment.clone());
@@ -487,14 +527,15 @@ impl Interpreter {
             .define(&decl.name, &callable)
     }
 
-    fn interpret_if_statement(&mut self, stmt: &IfStatement) -> Result<(), String> {
-        let condition = self.interpret_expression(&stmt.condition)?;
-        if condition.as_bool() {
-            self.interpret_statement(&*stmt.then_branch)?;
-        } else if let Some(else_branch) = &stmt.else_branch {
-            self.interpret_statement(&else_branch)?;
+    fn interpret_if_statement(&mut self, stmt: &IfStatement) -> Result<ControlFlow<Value>, String> {
+        if self.interpret_expression(&stmt.condition)?.as_bool() {
+            self.interpret_statement(&*stmt.then_branch)
+        } else {
+            match &stmt.else_branch {
+                Some(else_branch) => self.interpret_statement(&else_branch),
+                None => Ok(ControlFlow::Continue(())),
+            }
         }
-        Ok(())
     }
 
     fn interpret_print_statement(&mut self, stmt: &PrintStatement) -> Result<(), String> {
@@ -524,29 +565,46 @@ impl Interpreter {
             .define(&decl.name, &value)
     }
 
-    fn interpret_while_statement(&mut self, stmt: &WhileStatement) -> Result<(), String> {
+    fn interpret_while_statement(&mut self, stmt: &WhileStatement) -> Result<ControlFlow<Value>, String> {
+        let mut result = Ok(ControlFlow::Continue(()));
+
         while self.interpret_expression(&stmt.condition)?.as_bool() {
-            self.interpret_statement(&*stmt.body)?;
+            match self.interpret_statement(&*stmt.body) {
+                Ok(ControlFlow::Continue(())) => continue,
+                Ok(ControlFlow::Break(value)) => {
+                    result = Ok(ControlFlow::Break(value));
+                    break;
+                },
+                Err(e) => {
+                    result = Err(e);
+                    break;
+                }
+            }
         }
-        Ok(())
+
+        result
     }
 
     fn interpret_statement(&mut self, stmt: &Statement) -> Result<ControlFlow<Value>, String> {
         match stmt {
             Statement::Block(block) => self.interpret_block_statement(block),
+            Statement::For(f) => self.interpret_for_statement(f),
+            Statement::If(i) => self.interpret_if_statement(i),
             Statement::Return(ret) => self.interpret_return_statement(ret),
+            Statement::While(w) => self.interpret_while_statement(w),
 
             // map the results of other statements to ControlFlow::Continue
             _ => match stmt {
                 Statement::Block(_) => Err("Impossible statement".to_string()),
                 Statement::Assert(assert) => self.interpret_assert_statement(assert),
                 Statement::Expr(expr) => self.interpret_expression_statement(expr),
+                Statement::For(_) => Err("Impossible statement".to_string()),
                 Statement::FunDecl(fun) => self.interpret_function_declaration(fun),
-                Statement::If(i) => self.interpret_if_statement(i),
+                Statement::If(_) => Err("Impossible statement".to_string()),
                 Statement::Print(print) => self.interpret_print_statement(print),
                 Statement::Return(_) => Err("Impossible statement".to_string()),
+                Statement::While(_) => Err("Impossible statement".to_string()),
                 Statement::VarDecl(var) => self.interpret_variable_declaration(var),
-                Statement::While(w) => self.interpret_while_statement(w),
             }
             .map(|_| ControlFlow::Continue(())),
         }
