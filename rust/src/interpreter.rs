@@ -175,20 +175,6 @@ impl Environment {
         }))
     }
 
-    fn ancestor_of(
-        env: &Shared<Environment>,
-        distance: usize,
-    ) -> Result<Shared<Environment>, String> {
-        if distance == 0 {
-            Ok(env.clone())
-        } else {
-            match &env.borrow().enclosing {
-                Some(enclosing) => Self::ancestor_of(enclosing, distance - 1),
-                None => Err("Internal error: ancestor not found.".to_string()),
-            }
-        }
-    }
-
     fn get_from_ancestor(&self, distance: usize, name: &Token) -> Result<Value, String> {
         if distance == 0 {
             self.get(&name)
