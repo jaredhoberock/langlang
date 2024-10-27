@@ -122,7 +122,10 @@ impl<'a> Parser<'a> {
             return lte;
         }
 
-        Err(ParseError::new("Expected comparison operator".to_string(), self.remaining))
+        Err(ParseError::new(
+            "Expected comparison operator".to_string(),
+            self.remaining,
+        ))
     }
 
     fn identifier(&mut self) -> Result<Token, ParseError> {
@@ -523,9 +526,11 @@ impl<'a> Parser<'a> {
     // for_statement := "for" "(" ( variable_declaration | expression_statement ) expression? ";" expression? ")" statement
     #[restore_self_on_err]
     fn for_statement(&mut self) -> Result<Statement, ParseError> {
-        let _for = self.token(TokenKind::For)
+        let _for = self
+            .token(TokenKind::For)
             .map_err(ParseError::format_message("{} before for loop"))?;
-        let _lparen = self.token(TokenKind::LeftParen)
+        let _lparen = self
+            .token(TokenKind::LeftParen)
             .map_err(ParseError::format_message("{} after 'for'"))?;
 
         let mut initializer = None;
@@ -540,7 +545,8 @@ impl<'a> Parser<'a> {
             condition = Some(expr);
         }
 
-        let _semi = self.token(TokenKind::Semicolon)
+        let _semi = self
+            .token(TokenKind::Semicolon)
             .map_err(ParseError::format_message("{} after for loop condition"))?;
 
         let mut increment = None;
@@ -548,12 +554,18 @@ impl<'a> Parser<'a> {
             increment = Some(incr);
         }
 
-        let _rparen = self.token(TokenKind::RightParen)
+        let _rparen = self
+            .token(TokenKind::RightParen)
             .map_err(ParseError::format_message("{} after for loop increment"))?;
 
         let body = Box::new(self.statement()?);
 
-        Ok(Statement::For(ForStatement{initializer, condition, increment, body}))
+        Ok(Statement::For(ForStatement {
+            initializer,
+            condition,
+            increment,
+            body,
+        }))
     }
 
     // if_statement := "if" "(" expression ")" statement ( "else" statement )?
@@ -570,7 +582,11 @@ impl<'a> Parser<'a> {
             else_branch = Some(Box::new(self.statement()?));
         }
 
-        Ok(Statement::If(IfStatement{condition, then_branch, else_branch}))
+        Ok(Statement::If(IfStatement {
+            condition,
+            then_branch,
+            else_branch,
+        }))
     }
 
     // print_statement := "print" expression ";"
