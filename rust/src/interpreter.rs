@@ -297,21 +297,6 @@ impl Interpreter {
         }
     }
 
-    // XXX eliminate this
-    fn push_environment(&mut self) {
-        self.current_environment =
-            Environment::new_shared_with_enclosing(self.current_environment.clone());
-    }
-
-    // XXX eliminate this
-    fn pop_environment(&mut self) {
-        let enclosing = {
-            let current = self.current_environment.borrow();
-            current.enclosing.clone()
-        };
-        self.current_environment = enclosing.expect("Can't pop global environment");
-    }
-
     fn with_environment<T>(
         &mut self,
         new_env: Shared<Environment>,
@@ -324,10 +309,7 @@ impl Interpreter {
         result
     }
 
-    fn with_enclosed_environment<T>(
-        &mut self,
-        f: impl FnOnce(&mut Self) -> T,
-    ) -> T {
+    fn with_enclosed_environment<T>(&mut self, f: impl FnOnce(&mut Self) -> T) -> T {
         let env = Environment::new_shared_with_enclosing(self.current_environment.clone());
         self.with_environment(env, f)
     }
@@ -454,27 +436,23 @@ impl Interpreter {
         &mut self,
         block: &BlockStatement,
     ) -> Result<ControlFlow<Value>, String> {
-        self.push_environment();
-
-        let mut result = Ok(ControlFlow::Continue(()));
-
-        for stmt in &block.statements {
-            match self.interpret_statement(stmt) {
-                Ok(ControlFlow::Continue(())) => continue,
-                Ok(ControlFlow::Break(value)) => {
-                    result = Ok(ControlFlow::Break(value));
-                    break;
-                },
-                Err(e) => {
-                    result = Err(e);
-                    break;
+        self.with_enclosed_environment(|slf| {
+            let mut result = Ok(ControlFlow::Continue(()));
+            for stmt in &block.statements {
+                match slf.interpret_statement(stmt) {
+                    Ok(ControlFlow::Continue(())) => continue,
+                    Ok(ControlFlow::Break(value)) => {
+                        result = Ok(ControlFlow::Break(value));
+                        break;
+                    }
+                    Err(e) => {
+                        result = Err(e);
+                        break;
+                    }
                 }
             }
-        }
-
-        self.pop_environment();
-
-        result
+            result
+        })
     }
 
     fn interpret_expression_statement(&mut self, stmt: &ExpressionStatement) -> Result<(), String> {
@@ -482,7 +460,10 @@ impl Interpreter {
         Ok(())
     }
 
-    fn interpret_for_statement(&mut self, stmt: &ForStatement) -> Result<ControlFlow<Value>, String> {
+    fn interpret_for_statement(
+        &mut self,
+        stmt: &ForStatement,
+    ) -> Result<ControlFlow<Value>, String> {
         self.with_enclosed_environment(|slf| {
             let mut result = Ok(ControlFlow::Continue(()));
 
@@ -499,7 +480,7 @@ impl Interpreter {
                     Ok(ControlFlow::Break(value)) => {
                         result = Ok(ControlFlow::Break(value));
                         break;
-                    },
+                    }
                     Err(e) => {
                         result = Err(e);
                         break;
@@ -565,7 +546,10 @@ impl Interpreter {
             .define(&decl.name, &value)
     }
 
-    fn interpret_while_statement(&mut self, stmt: &WhileStatement) -> Result<ControlFlow<Value>, String> {
+    fn interpret_while_statement(
+        &mut self,
+        stmt: &WhileStatement,
+    ) -> Result<ControlFlow<Value>, String> {
         let mut result = Ok(ControlFlow::Continue(()));
 
         while self.interpret_expression(&stmt.condition)?.as_bool() {
@@ -574,7 +558,7 @@ impl Interpreter {
                 Ok(ControlFlow::Break(value)) => {
                     result = Ok(ControlFlow::Break(value));
                     break;
-                },
+                }
                 Err(e) => {
                     result = Err(e);
                     break;
