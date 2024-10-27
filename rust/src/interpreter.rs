@@ -186,20 +186,20 @@ impl Environment {
         }
     }
 
-    fn put_in_ancestor(
+    fn set_in_ancestor(
         &mut self,
         distance: usize,
         name: &Token,
         value: &Value,
     ) -> Result<(), String> {
         if distance == 0 {
-            self.put(&name, &value)
+            self.set(&name, &value)
         } else {
             match &self.enclosing {
                 Some(enclosing) => {
                     enclosing
                         .borrow_mut()
-                        .put_in_ancestor(distance - 1, name, value)
+                        .set_in_ancestor(distance - 1, name, value)
                 }
                 None => Err("Internal error: ancestor not found.".to_string()),
             }
@@ -216,12 +216,12 @@ impl Environment {
         }
     }
 
-    fn put(&mut self, name: &Token, value: &Value) -> Result<(), String> {
+    fn set(&mut self, name: &Token, value: &Value) -> Result<(), String> {
         if self.values.contains_key(&name.lexeme) {
             self.values.insert(name.lexeme.clone(), value.clone());
             Ok(())
         } else if let Some(enclosing) = &mut self.enclosing {
-            enclosing.borrow_mut().put(name, value)
+            enclosing.borrow_mut().set(name, value)
         } else {
             Err(format!("Undefined variable '{}'.", &name.lexeme))
         }
@@ -417,7 +417,7 @@ impl Interpreter {
         let ancestor = self.name_resolver.lookup(&expr.var)?;
         self.current_environment
             .borrow_mut()
-            .put_in_ancestor(ancestor, &expr.var.name, &value)?;
+            .set_in_ancestor(ancestor, &expr.var.name, &value)?;
         Ok(value)
     }
 
