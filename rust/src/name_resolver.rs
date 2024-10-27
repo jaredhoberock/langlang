@@ -191,6 +191,15 @@ impl NameResolver {
         })
     }
 
+    fn resolve_if_statement(&mut self, stmt: &IfStatement) -> Result<(), String> {
+        self.resolve_expression(&stmt.condition)?;
+        self.resolve_statement(&*stmt.then_branch)?;
+        if let Some(else_branch) = &stmt.else_branch {
+            self.resolve_statement(&else_branch)?;
+        }
+        Ok(())
+    }
+
     fn resolve_variable_declaration(&mut self, decl: &VariableDeclaration) -> Result<(), String> {
         self.declare(&decl.name)?;
         if let Some(init) = &decl.initializer {
@@ -205,6 +214,7 @@ impl NameResolver {
             Statement::Block(b) => self.resolve_block_statement(b),
             Statement::Expr(e) => self.resolve_expression_statement(e),
             Statement::FunDecl(f) => self.resolve_function_declaration(f),
+            Statement::If(i) => self.resolve_if_statement(i),
             Statement::Print(p) => self.resolve_print_statement(p),
             Statement::Return(r) => self.resolve_return_statement(r),
             Statement::VarDecl(v) => self.resolve_variable_declaration(v),

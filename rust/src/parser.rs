@@ -100,6 +100,31 @@ impl<'a> Parser<'a> {
         Err(ParseError::combine(errors))
     }
 
+    #[restore_self_on_err]
+    fn any_comparison_operator(&mut self) -> Result<Token, ParseError> {
+        let gt = self.token(TokenKind::Greater);
+        if gt.is_ok() {
+            return gt;
+        }
+
+        let gte = self.token(TokenKind::GreaterEqual);
+        if gte.is_ok() {
+            return gte;
+        }
+
+        let lt = self.token(TokenKind::Less);
+        if lt.is_ok() {
+            return lt;
+        }
+
+        let lte = self.token(TokenKind::LessEqual);
+        if lte.is_ok() {
+            return lte;
+        }
+
+        Err(ParseError::new("Expected comparison operator".to_string(), self.remaining))
+    }
+
     fn identifier(&mut self) -> Result<Token, ParseError> {
         self.token(TokenKind::Identifier)
     }
@@ -332,9 +357,22 @@ impl<'a> Parser<'a> {
         Ok(result)
     }
 
-    // comparison := term
+    // comparison := term ( ( ">" | ">=" | "<" | "<=" ) term )*
     fn comparison(&mut self) -> Result<Expression, ParseError> {
-        self.term()
+        let mut result = self.term()?;
+
+        while let Ok(op) = self.any_comparison_operator() {
+            // parse the rhs
+            let right_expr = self.term()?;
+
+            result = Expression::Binary(BinaryExpression {
+                left_expr: Box::new(result),
+                op,
+                right_expr: Box::new(right_expr),
+            })
+        }
+
+        Ok(result)
     }
 
     // equality := comparison ( ( "!=" | "==" ) comparison )*
@@ -482,6 +520,23 @@ impl<'a> Parser<'a> {
         return Ok(Statement::Expr(ExpressionStatement { expr }));
     }
 
+    // if_statement := "if" "(" expression ")" statement ( "else" statement )?
+    #[restore_self_on_err]
+    fn if_statement(&mut self) -> Result<Statement, ParseError> {
+        let _if = self.token(TokenKind::If)?;
+        let _lparen = self.token(TokenKind::LeftParen)?;
+        let condition = self.expression()?;
+        let _rparen = self.token(TokenKind::RightParen)?;
+        let then_branch = Box::new(self.statement()?);
+
+        let mut else_branch = None;
+        if let Ok(_else) = self.token(TokenKind::Else) {
+            else_branch = Some(Box::new(self.statement()?));
+        }
+
+        Ok(Statement::If(IfStatement{condition, then_branch, else_branch}))
+    }
+
     // print_statement := "print" expression ";"
     #[restore_self_on_err]
     fn print_statement(&mut self) -> Result<Statement, ParseError> {
@@ -503,7 +558,7 @@ impl<'a> Parser<'a> {
         Ok(Statement::Return(ReturnStatement { expr }))
     }
 
-    // statement := assert_statement | block_statement | expression_statement | print_statement | return_statement
+    // statement := assert_statement | block_statement | expression_statement | if_statement | print_statement | return_statement
     #[restore_self_on_err]
     fn statement(&mut self) -> Result<Statement, ParseError> {
         let assert = self.assert_statement();
@@ -521,6 +576,11 @@ impl<'a> Parser<'a> {
             return expr_stmt;
         }
 
+        let if_stmt = self.if_statement();
+        if if_stmt.is_ok() {
+            return if_stmt;
+        }
+
         let print = self.print_statement();
         if print.is_ok() {
             return print;
@@ -535,6 +595,7 @@ impl<'a> Parser<'a> {
             assert.unwrap_err(),
             block.unwrap_err(),
             expr_stmt.unwrap_err(),
+            if_stmt.unwrap_err(),
             print.unwrap_err(),
             ret.unwrap_err(),
         ];

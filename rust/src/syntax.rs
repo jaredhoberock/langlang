@@ -88,6 +88,13 @@ pub struct FunctionDeclaration {
 }
 
 #[derive(Debug)]
+pub struct IfStatement {
+    pub condition: Expression,
+    pub then_branch: Box<Statement>,
+    pub else_branch: Option<Box<Statement>>,
+}
+
+#[derive(Debug)]
 pub struct PrintStatement {
     pub expr: Expression,
 }
@@ -109,6 +116,7 @@ pub enum Statement {
     Block(BlockStatement),
     Expr(ExpressionStatement),
     FunDecl(FunctionDeclaration),
+    If(IfStatement),
     Print(PrintStatement),
     Return(ReturnStatement),
     VarDecl(VariableDeclaration),

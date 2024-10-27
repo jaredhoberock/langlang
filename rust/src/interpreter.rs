@@ -487,6 +487,16 @@ impl Interpreter {
             .define(&decl.name, &callable)
     }
 
+    fn interpret_if_statement(&mut self, stmt: &IfStatement) -> Result<(), String> {
+        let condition = self.interpret_expression(&stmt.condition)?;
+        if condition.as_bool() {
+            self.interpret_statement(&*stmt.then_branch)?;
+        } else if let Some(else_branch) = &stmt.else_branch {
+            self.interpret_statement(&else_branch)?;
+        }
+        Ok(())
+    }
+
     fn interpret_print_statement(&mut self, stmt: &PrintStatement) -> Result<(), String> {
         let val = self.interpret_expression(&stmt.expr)?;
         println!("{}", val);
@@ -525,6 +535,7 @@ impl Interpreter {
                 Statement::Assert(assert) => self.interpret_assert_statement(assert),
                 Statement::Expr(expr) => self.interpret_expression_statement(expr),
                 Statement::FunDecl(fun) => self.interpret_function_declaration(fun),
+                Statement::If(i) => self.interpret_if_statement(i),
                 Statement::Print(print) => self.interpret_print_statement(print),
                 Statement::Return(_) => Err("Impossible statement".to_string()),
                 Statement::VarDecl(var) => self.interpret_variable_declaration(var),
