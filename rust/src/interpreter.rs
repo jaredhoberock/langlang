@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use std::ops::ControlFlow;
 use std::rc::Rc;
 
+use crate::name_resolver::NameResolver;
 use crate::syntax::*;
 use crate::token::*;
 
@@ -174,6 +175,51 @@ impl Environment {
         }))
     }
 
+    fn ancestor_of(
+        env: &Shared<Environment>,
+        distance: usize,
+    ) -> Result<Shared<Environment>, String> {
+        if distance == 0 {
+            Ok(env.clone())
+        } else {
+            match &env.borrow().enclosing {
+                Some(enclosing) => Self::ancestor_of(enclosing, distance - 1),
+                None => Err("Internal error: ancestor not found.".to_string()),
+            }
+        }
+    }
+
+    fn get_from_ancestor(&self, distance: usize, name: &Token) -> Result<Value, String> {
+        if distance == 0 {
+            self.get(&name)
+        } else {
+            match &self.enclosing {
+                Some(enclosing) => enclosing.borrow().get_from_ancestor(distance - 1, name),
+                None => Err("Internal error: ancestor not found.".to_string()),
+            }
+        }
+    }
+
+    fn put_in_ancestor(
+        &mut self,
+        distance: usize,
+        name: &Token,
+        value: &Value,
+    ) -> Result<(), String> {
+        if distance == 0 {
+            self.put(&name, &value)
+        } else {
+            match &self.enclosing {
+                Some(enclosing) => {
+                    enclosing
+                        .borrow_mut()
+                        .put_in_ancestor(distance - 1, name, value)
+                }
+                None => Err("Internal error: ancestor not found.".to_string()),
+            }
+        }
+    }
+
     fn get(&self, name: &Token) -> Result<Value, String> {
         if let Some(value) = self.values.get(&name.lexeme) {
             Ok(value.clone())
@@ -256,12 +302,14 @@ impl UserFunction {
 
 pub struct Interpreter {
     current_environment: Shared<Environment>,
+    name_resolver: NameResolver,
 }
 
 impl Interpreter {
     pub fn new() -> Self {
         Interpreter {
             current_environment: Environment::new_shared(),
+            name_resolver: NameResolver::new(),
         }
     }
 
@@ -369,7 +417,10 @@ impl Interpreter {
     }
 
     fn interpret_variable(&mut self, var: &Variable) -> Result<Value, String> {
-        self.current_environment.borrow().get(&var.name)
+        let ancestor = self.name_resolver.lookup(&var)?;
+        self.current_environment
+            .borrow()
+            .get_from_ancestor(ancestor, &var.name)
     }
 
     fn interpret_assignment_expression(
@@ -377,9 +428,10 @@ impl Interpreter {
         expr: &AssignmentExpression,
     ) -> Result<Value, String> {
         let value = self.interpret_expression(&*expr.expr)?;
+        let ancestor = self.name_resolver.lookup(&expr.var)?;
         self.current_environment
             .borrow_mut()
-            .put(&expr.var.name, &value)?;
+            .put_in_ancestor(ancestor, &expr.var.name, &value)?;
         Ok(value)
     }
 
@@ -496,6 +548,9 @@ impl Interpreter {
     }
 
     pub fn interpret_program(&mut self, prog: &Program) -> Result<(), String> {
+        // first do name resolution
+        self.name_resolver.resolve_program(&prog)?;
+
         for stmt in &prog.statements {
             self.interpret_statement(stmt)?;
         }
