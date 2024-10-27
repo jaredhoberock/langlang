@@ -66,6 +66,25 @@ pub enum Expression {
 }
 
 #[derive(Debug)]
+pub struct FunctionDeclaration {
+    pub name: Token,
+    pub parameters: Vec<Token>,
+    pub body: BlockStatement,
+}
+
+#[derive(Debug)]
+pub struct VariableDeclaration {
+    pub name: Token,
+    pub initializer: Option<Expression>,
+}
+
+#[derive(Debug)]
+pub enum Declaration {
+    Function(FunctionDeclaration),
+    Variable(VariableDeclaration),
+}
+
+#[derive(Debug)]
 pub struct AssertStatement {
     pub expr: Expression,
 }
@@ -89,13 +108,6 @@ pub struct ForStatement {
 }
 
 #[derive(Debug)]
-pub struct FunctionDeclaration {
-    pub name: Token,
-    pub parameters: Vec<Token>,
-    pub body: BlockStatement,
-}
-
-#[derive(Debug)]
 pub struct IfStatement {
     pub condition: Expression,
     pub then_branch: Box<Statement>,
@@ -113,12 +125,6 @@ pub struct ReturnStatement {
 }
 
 #[derive(Debug)]
-pub struct VariableDeclaration {
-    pub name: Token,
-    pub initializer: Option<Expression>,
-}
-
-#[derive(Debug)]
 pub struct WhileStatement {
     pub condition: Expression,
     pub body: Box<Statement>,
@@ -128,13 +134,12 @@ pub struct WhileStatement {
 pub enum Statement {
     Assert(AssertStatement),
     Block(BlockStatement),
+    Decl(Declaration),
     Expr(ExpressionStatement),
     For(ForStatement),
-    FunDecl(FunctionDeclaration),
     If(IfStatement),
     Print(PrintStatement),
     Return(ReturnStatement),
-    VarDecl(VariableDeclaration),
     While(WhileStatement),
 }
 

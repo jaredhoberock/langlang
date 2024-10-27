@@ -465,9 +465,48 @@ impl<'a> Parser<'a> {
         self.assignment()
     }
 
+    // parameters := identifier ( "," identifier )*
+    #[restore_self_on_err]
+    fn parameters(&mut self) -> Result<Vec<Token>, ParseError> {
+        let mut params = vec![self.identifier()?];
+
+        while self.token(TokenKind::Comma).is_ok() {
+            let param = self
+                .identifier()
+                .map_err(ParseError::format_message("{} in function parameter list"))?;
+            params.push(param);
+        }
+
+        Ok(params)
+    }
+
+    // function_declaration := "fun" identifier "(" parameters? ")" block_statement
+    #[restore_self_on_err]
+    fn function_declaration(&mut self) -> Result<Declaration, ParseError> {
+        let _fun = self
+            .token(TokenKind::Fun)
+            .map_err(ParseError::format_message("{} before function name"))?;
+        let name = self.identifier()?;
+        let _lparen = self.token(TokenKind::LeftParen)?;
+
+        let mut parameters = Vec::new();
+        if let Ok(params) = self.parameters() {
+            parameters = params;
+        }
+
+        let _rparen = self.token(TokenKind::RightParen)?;
+        let body = self.block_statement()?;
+
+        Ok(Declaration::Function(FunctionDeclaration {
+            name,
+            parameters,
+            body,
+        }))
+    }
+
     // variable_declaration := "var" identifier ( "=" expression )? ";"
     #[restore_self_on_err]
-    fn variable_declaration(&mut self) -> Result<Statement, ParseError> {
+    fn variable_declaration(&mut self) -> Result<Declaration, ParseError> {
         let _var = self.token(TokenKind::Var)?;
         let name = self.identifier()?;
 
@@ -479,10 +518,33 @@ impl<'a> Parser<'a> {
 
         let _semi = self.token(TokenKind::Semicolon)?;
 
-        Ok(Statement::VarDecl(VariableDeclaration {
+        Ok(Declaration::Variable(VariableDeclaration {
             name,
             initializer,
         }))
+    }
+
+    // declaration := function_declaration | variable_declaration
+    #[restore_self_on_err]
+    fn declaration(&mut self) -> Result<Statement, ParseError> {
+        let fun = self.function_declaration()
+            .map(Statement::Decl);
+        if fun.is_ok() {
+            return fun;
+        }
+
+        let var = self.variable_declaration()
+            .map(Statement::Decl);
+        if var.is_ok() {
+            return var;
+        }
+
+        let errors = vec![
+            fun.unwrap_err(),
+            var.unwrap_err(),
+        ];
+
+        Err(ParseError::combine(errors))
     }
 
     // assert_statement := "assert" expression ";"
@@ -494,7 +556,7 @@ impl<'a> Parser<'a> {
         Ok(Statement::Assert(AssertStatement { expr }))
     }
 
-    // block_statement := "{" ( declaration )* "}"
+    // block_statement := "{" ( statement )* "}"
     #[restore_self_on_err]
     fn block_statement(&mut self) -> Result<BlockStatement, ParseError> {
         let _lbrace = self
@@ -508,7 +570,7 @@ impl<'a> Parser<'a> {
                 break;
             }
 
-            let stmt = self.declaration()?;
+            let stmt = self.statement()?;
             statements.push(stmt);
         }
 
@@ -534,7 +596,7 @@ impl<'a> Parser<'a> {
             .map_err(ParseError::format_message("{} after 'for'"))?;
 
         let mut initializer = None;
-        if let Ok(var_decl) = self.variable_declaration() {
+        if let Ok(var_decl) = self.variable_declaration().map(Statement::Decl) {
             initializer = Some(Box::new(var_decl));
         } else if let Ok(expr_stmt) = self.expression_statement() {
             initializer = Some(Box::new(expr_stmt));
@@ -611,6 +673,7 @@ impl<'a> Parser<'a> {
     }
 
     // while_statement := "while" "(" condition ")" statement
+    #[restore_self_on_err]
     fn while_statement(&mut self) -> Result<Statement, ParseError> {
         let _while = self.token(TokenKind::While)?;
         let _lparen = self.token(TokenKind::LeftParen)?;
@@ -620,8 +683,8 @@ impl<'a> Parser<'a> {
         Ok(Statement::While(WhileStatement { condition, body }))
     }
 
-    // statement := assert_statement | block_statement | expression_statement | for_statement |
-    //              if_statement | print_statement | return_statement | while_statement
+    // statement := assert_statement | block_statement | declaration | expression_statement |
+    //              for_statement | if_statement | print_statement | return_statement | while_statement
     #[restore_self_on_err]
     fn statement(&mut self) -> Result<Statement, ParseError> {
         let assert = self.assert_statement();
@@ -629,9 +692,14 @@ impl<'a> Parser<'a> {
             return assert;
         }
 
-        let block = self.block_statement();
+        let block = self.block_statement().map(Statement::Block);
         if block.is_ok() {
-            return block.map(Statement::Block);
+            return block;
+        }
+
+        let decl = self.declaration();
+        if decl.is_ok() {
+            return decl;
         }
 
         let expr_stmt = self.expression_statement();
@@ -667,6 +735,7 @@ impl<'a> Parser<'a> {
         let errors = vec![
             assert.unwrap_err(),
             block.unwrap_err(),
+            decl.unwrap_err(),
             expr_stmt.unwrap_err(),
             for_stmt.unwrap_err(),
             if_stmt.unwrap_err(),
@@ -678,73 +747,7 @@ impl<'a> Parser<'a> {
         Err(ParseError::combine(errors))
     }
 
-    // parameters := identifier ( "," identifier )*
-    #[restore_self_on_err]
-    fn parameters(&mut self) -> Result<Vec<Token>, ParseError> {
-        let mut params = vec![self.identifier()?];
-
-        while self.token(TokenKind::Comma).is_ok() {
-            let param = self
-                .identifier()
-                .map_err(ParseError::format_message("{} in function parameter list"))?;
-            params.push(param);
-        }
-
-        Ok(params)
-    }
-
-    // function_declaration := "fun" identifier "(" parameters? ")" block_statement
-    #[restore_self_on_err]
-    fn function_declaration(&mut self) -> Result<Statement, ParseError> {
-        let _fun = self
-            .token(TokenKind::Fun)
-            .map_err(ParseError::format_message("{} before function name"))?;
-        let name = self.identifier()?;
-        let _lparen = self.token(TokenKind::LeftParen)?;
-
-        let mut parameters = Vec::new();
-        if let Ok(params) = self.parameters() {
-            parameters = params;
-        }
-
-        let _rparen = self.token(TokenKind::RightParen)?;
-        let body = self.block_statement()?;
-
-        Ok(Statement::FunDecl(FunctionDeclaration {
-            name,
-            parameters,
-            body,
-        }))
-    }
-
-    // declaration := function_declaration | variable_declaration | statement
-    #[restore_self_on_err]
-    fn declaration(&mut self) -> Result<Statement, ParseError> {
-        let fun_decl = self.function_declaration();
-        if fun_decl.is_ok() {
-            return fun_decl;
-        }
-
-        let var_decl = self.variable_declaration();
-        if var_decl.is_ok() {
-            return var_decl;
-        }
-
-        let stmt = self.statement();
-        if stmt.is_ok() {
-            return stmt;
-        }
-
-        let errors = vec![
-            fun_decl.unwrap_err(),
-            var_decl.unwrap_err(),
-            stmt.unwrap_err(),
-        ];
-
-        Err(ParseError::combine(errors))
-    }
-
-    // program := declaration* EOF
+    // program := statement* EOF
     #[restore_self_on_err]
     fn program(&mut self) -> Result<Program, ParseError> {
         let mut stmts = Vec::new();
@@ -754,7 +757,7 @@ impl<'a> Parser<'a> {
                 break;
             }
 
-            match self.declaration() {
+            match self.statement() {
                 Ok(stmt) => stmts.push(stmt),
                 Err(error) => return Err(error),
             }

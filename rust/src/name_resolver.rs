@@ -149,6 +149,13 @@ impl NameResolver {
         }
     }
 
+    fn resolve_declaration(&mut self, decl: &Declaration) -> Result<(), String> {
+        match decl {
+            Declaration::Function(f) => self.resolve_function_declaration(f),
+            Declaration::Variable(v) => self.resolve_variable_declaration(v),
+        }
+    }
+
     fn resolve_assert_statement(&mut self, stmt: &AssertStatement) -> Result<(), String> {
         self.resolve_expression(&stmt.expr)
     }
@@ -231,12 +238,11 @@ impl NameResolver {
             Statement::Assert(a) => self.resolve_assert_statement(a),
             Statement::Block(b) => self.resolve_block_statement(b),
             Statement::Expr(e) => self.resolve_expression_statement(e),
+            Statement::Decl(d) => self.resolve_declaration(d),
             Statement::For(f) => self.resolve_for_statement(f),
-            Statement::FunDecl(f) => self.resolve_function_declaration(f),
             Statement::If(i) => self.resolve_if_statement(i),
             Statement::Print(p) => self.resolve_print_statement(p),
             Statement::Return(r) => self.resolve_return_statement(r),
-            Statement::VarDecl(v) => self.resolve_variable_declaration(v),
             Statement::While(w) => self.resolve_while_statement(w),
         }
     }

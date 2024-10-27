@@ -424,6 +424,36 @@ impl Interpreter {
         }
     }
 
+    fn interpret_function_declaration(&mut self, decl: &FunctionDeclaration) -> Result<(), String> {
+        let repr = format!("<fn {}>", decl.name.lexeme);
+        let func = UserFunction::new(decl, self.current_environment.clone());
+        let callable = Value::Callable(Callable::new_user_function(
+            decl.parameters.len(),
+            repr,
+            func,
+        ));
+        self.current_environment
+            .borrow_mut()
+            .define(&decl.name, &callable)
+    }
+
+    fn interpret_variable_declaration(&mut self, decl: &VariableDeclaration) -> Result<(), String> {
+        let value = match &decl.initializer {
+            Some(expr) => self.interpret_expression(expr)?,
+            None => Value::Nil,
+        };
+        self.current_environment
+            .borrow_mut()
+            .define(&decl.name, &value)
+    }
+
+    fn interpret_declaration(&mut self, decl: &Declaration) -> Result<(), String> {
+        match decl {
+            Declaration::Function(f) => self.interpret_function_declaration(f),
+            Declaration::Variable(v) => self.interpret_variable_declaration(v),
+        }
+    }
+
     fn interpret_assert_statement(&mut self, stmt: &AssertStatement) -> Result<(), String> {
         let val = self.interpret_expression(&stmt.expr)?;
         if !val.as_bool() {
@@ -495,19 +525,6 @@ impl Interpreter {
         })
     }
 
-    fn interpret_function_declaration(&mut self, decl: &FunctionDeclaration) -> Result<(), String> {
-        let repr = format!("<fn {}>", decl.name.lexeme);
-        let func = UserFunction::new(decl, self.current_environment.clone());
-        let callable = Value::Callable(Callable::new_user_function(
-            decl.parameters.len(),
-            repr,
-            func,
-        ));
-        self.current_environment
-            .borrow_mut()
-            .define(&decl.name, &callable)
-    }
-
     fn interpret_if_statement(&mut self, stmt: &IfStatement) -> Result<ControlFlow<Value>, String> {
         if self.interpret_expression(&stmt.condition)?.as_bool() {
             self.interpret_statement(&*stmt.then_branch)
@@ -534,16 +551,6 @@ impl Interpreter {
             None => Value::Nil,
         };
         Ok(ControlFlow::Break(value))
-    }
-
-    fn interpret_variable_declaration(&mut self, decl: &VariableDeclaration) -> Result<(), String> {
-        let value = match &decl.initializer {
-            Some(expr) => self.interpret_expression(expr)?,
-            None => Value::Nil,
-        };
-        self.current_environment
-            .borrow_mut()
-            .define(&decl.name, &value)
     }
 
     fn interpret_while_statement(
@@ -581,14 +588,13 @@ impl Interpreter {
             _ => match stmt {
                 Statement::Block(_) => Err("Impossible statement".to_string()),
                 Statement::Assert(assert) => self.interpret_assert_statement(assert),
+                Statement::Decl(decl) => self.interpret_declaration(decl),
                 Statement::Expr(expr) => self.interpret_expression_statement(expr),
                 Statement::For(_) => Err("Impossible statement".to_string()),
-                Statement::FunDecl(fun) => self.interpret_function_declaration(fun),
                 Statement::If(_) => Err("Impossible statement".to_string()),
                 Statement::Print(print) => self.interpret_print_statement(print),
                 Statement::Return(_) => Err("Impossible statement".to_string()),
                 Statement::While(_) => Err("Impossible statement".to_string()),
-                Statement::VarDecl(var) => self.interpret_variable_declaration(var),
             }
             .map(|_| ControlFlow::Continue(())),
         }
