@@ -4,12 +4,33 @@ use std::ptr::NonNull;
 use crate::syntax::*;
 use crate::token::Token;
 
+// for now, just keep track of whether the a scope is the global scope or a function scope
+enum ScopeKind {
+    Block,
+    Global,
+    Function,
+}
+
+struct Scope {
+    pub kind: ScopeKind,
+
+    // maps a name to whether or not it has been defined
+    pub names: HashMap<String, bool>,
+}
+
+impl Scope {
+    fn new(kind: ScopeKind) -> Self {
+        Self { kind, names: HashMap::new() }
+    }
+}
+
 pub struct NameResolver {
     // maps each resolved name to the scope in which its referent is defined
     symbol_table: HashMap<NonNull<Variable>, usize>,
 
     // a scope maps a name to whether or not it has been defined
-    scopes: Vec<HashMap<String, bool>>,
+    // XXX we should also track the type of scope we're in
+    scopes: Vec<Scope>,
 }
 
 impl NameResolver {
@@ -32,9 +53,10 @@ impl NameResolver {
 
     fn with_new_scope<T>(
         &mut self,
+        kind: ScopeKind,
         f: impl FnOnce(&mut Self) -> Result<T, String>,
     ) -> Result<T, String> {
-        self.scopes.push(HashMap::new());
+        self.scopes.push(Scope::new(kind));
         let result = f(self);
         self.scopes.pop();
         result
@@ -45,7 +67,7 @@ impl NameResolver {
             return Err("Cannot declare variable outside of a scope".to_string());
         }
 
-        if self.scopes.last().unwrap().contains_key(&name.lexeme) {
+        if self.scopes.last().unwrap().names.contains_key(&name.lexeme) {
             return Err(format!(
                 "Variable '{}' is already declared in this scope",
                 name.lexeme
@@ -55,6 +77,7 @@ impl NameResolver {
         self.scopes
             .last_mut()
             .unwrap()
+            .names
             .insert(name.lexeme.clone(), false);
         Ok(())
     }
@@ -66,14 +89,14 @@ impl NameResolver {
 
         let scope = self.scopes.last_mut().unwrap();
 
-        if !scope.contains_key(&name.lexeme) {
+        if !scope.names.contains_key(&name.lexeme) {
             return Err(format!(
                 "Cannot define variable '{}' before declaration",
                 name.lexeme
             ));
         }
 
-        scope.insert(name.lexeme.clone(), true);
+        scope.names.insert(name.lexeme.clone(), true);
         Ok(())
     }
 
@@ -86,7 +109,7 @@ impl NameResolver {
         // the stack for a declaration for name, and note
         // the location of its scope if found
         for i in (0..self.scopes.len()).rev() {
-            if self.scopes[i].contains_key(&variable.name.lexeme) {
+            if self.scopes[i].names.contains_key(&variable.name.lexeme) {
                 // we record the distance that we need to "climb" from
                 // the innermost scope to find the name's referent
                 self.symbol_table
@@ -161,6 +184,16 @@ impl NameResolver {
     }
 
     fn resolve_return_statement(&mut self, stmt: &ReturnStatement) -> Result<(), String> {
+        if self.scopes.is_empty() {
+            return Err("Cannot resolve return outside of a scope".to_string());
+        }
+
+        let scope = self.scopes.last().unwrap();
+        match scope.kind {
+            ScopeKind::Global => return Err("Can't return from top-level code.".to_string()),
+            _ => (),
+        }
+
         if let Some(expr) = &stmt.expr {
             self.resolve_expression(expr)
         } else {
@@ -177,7 +210,7 @@ impl NameResolver {
     }
 
     fn resolve_block_statement(&mut self, block: &BlockStatement) -> Result<(), String> {
-        self.with_new_scope(|slf| {
+        self.with_new_scope(ScopeKind::Block, |slf| {
             for stmt in &block.statements {
                 slf.resolve_statement(stmt)?;
             }
@@ -202,7 +235,7 @@ impl NameResolver {
         self.declare(&decl.name)?;
         self.define(&decl.name)?;
 
-        self.with_new_scope(|slf| {
+        self.with_new_scope(ScopeKind::Function, |slf| {
             for param in &decl.parameters {
                 slf.declare(param)?;
                 slf.define(param)?;
@@ -252,7 +285,7 @@ impl NameResolver {
             return Err("Internal error: scopes should be empty at start of program".to_string());
         }
 
-        self.with_new_scope(|slf| {
+        self.with_new_scope(ScopeKind::Global, |slf| {
             for stmt in &prog.statements {
                 slf.resolve_statement(stmt)?;
             }
