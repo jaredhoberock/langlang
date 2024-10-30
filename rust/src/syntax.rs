@@ -34,6 +34,12 @@ pub struct CallExpression {
 }
 
 #[derive(Debug)]
+pub struct GetExpression {
+    pub object: Box<Expression>,
+    pub name: Token,
+}
+
+#[derive(Debug)]
 pub struct GroupingExpression {
     pub lparen: Token,
     pub expr: Box<Expression>,
@@ -48,6 +54,18 @@ pub struct LogicalExpression {
 }
 
 #[derive(Debug)]
+pub struct SetExpression {
+    pub object: Box<Expression>,
+    pub name: Token,
+    pub value: Box<Expression>,
+}
+
+#[derive(Debug)]
+pub struct ThisExpression {
+    pub keyword: Token,
+}
+
+#[derive(Debug)]
 pub struct UnaryExpression {
     pub op: Token,
     pub expr: Box<Expression>,
@@ -58,11 +76,20 @@ pub enum Expression {
     Assignment(AssignmentExpression),
     Binary(BinaryExpression),
     Call(CallExpression),
+    Get(GetExpression),
     Grouping(GroupingExpression),
     Literal(Literal),
     Logical(LogicalExpression),
+    Set(SetExpression),
+    This(ThisExpression),
     Unary(UnaryExpression),
     Variable(Variable),
+}
+
+#[derive(Debug)]
+pub struct ClassDeclaration {
+    pub name: Token,
+    pub methods: Vec<FunctionDeclaration>,
 }
 
 #[derive(Debug)]
@@ -80,6 +107,7 @@ pub struct VariableDeclaration {
 
 #[derive(Debug)]
 pub enum Declaration {
+    Class(ClassDeclaration),
     Function(FunctionDeclaration),
     Variable(VariableDeclaration),
 }

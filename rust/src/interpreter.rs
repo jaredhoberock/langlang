@@ -2,15 +2,19 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::ops::ControlFlow;
 use std::rc::Rc;
+use std::rc::Weak;
 
 use crate::name_resolver::NameResolver;
 use crate::syntax::*;
 use crate::token::*;
 
+type Shared<T> = Rc<RefCell<T>>;
+
 #[derive(Clone, Debug, PartialEq)]
 enum Value {
     Callable(Callable),
     Bool(bool),
+    Instance(Shared<Instance>),
     Nil,
     Number(f64),
     String(String),
@@ -28,6 +32,7 @@ impl Value {
     fn as_string(&self) -> String {
         match self {
             Value::Callable(c) => c.to_string(),
+            Value::Instance(i) => i.borrow().to_string(),
             Value::Number(n) => {
                 let s = n.to_string();
                 if s.ends_with(".0") {
@@ -85,62 +90,56 @@ impl std::fmt::Display for Value {
 }
 
 #[derive(Clone)]
-struct Callable {
-    arity: usize,
-    repr: String,
-    func: CallableKind,
-}
-
-#[derive(Clone)]
-enum CallableKind {
-    BuiltIn(Rc<dyn Fn(&mut Interpreter, &Vec<Value>) -> Result<Value, String>>),
+enum Callable {
+    BuiltIn(
+        usize,
+        Rc<dyn Fn(&mut Interpreter, &Vec<Value>) -> Result<Value, String>>,
+    ),
+    Class(Rc<Class>),
     User(UserFunction),
 }
 
 impl Callable {
-    fn new_user_function(arity: usize, repr: String, func: UserFunction) -> Self {
-        Self {
-            arity,
-            repr,
-            func: CallableKind::User(func),
-        }
-    }
-
-    fn new_built_in_function<F>(arity: usize, repr: String, func: F) -> Self
+    fn new_built_in_function<F>(arity: usize, func: F) -> Self
     where
         F: Fn(&mut Interpreter, &Vec<Value>) -> Result<Value, String> + 'static,
     {
-        Self {
-            arity,
-            repr,
-            func: CallableKind::BuiltIn(Rc::new(func)),
-        }
+        Self::BuiltIn(arity, Rc::new(func))
     }
 
     fn call(&self, interp: &mut Interpreter, arguments: &Vec<Value>) -> Result<Value, String> {
-        match &self.func {
-            CallableKind::BuiltIn(f) => f(interp, arguments),
-            CallableKind::User(f) => f.call(interp, arguments),
+        match &self {
+            Callable::BuiltIn(_arity, f) => f(interp, arguments),
+            Callable::Class(c) => c.call(interp, arguments),
+            Callable::User(f) => f.call(interp, arguments),
         }
     }
 
     fn arity(&self) -> usize {
-        self.arity
+        match &self {
+            Callable::Class(c) => c.arity(),
+            Callable::User(f) => f.arity(),
+            Callable::BuiltIn(arity, _) => *arity,
+        }
     }
 
     fn to_string(&self) -> String {
-        self.repr.clone()
+        match &self {
+            Callable::Class(class) => class.to_string(),
+            Callable::User(fun) => fun.to_string(),
+            Callable::BuiltIn(_, _) => "<builtin fn>".to_string(),
+        }
     }
 }
 
 impl PartialEq for Callable {
     fn eq(&self, other: &Self) -> bool {
-        match (&self.func, &other.func) {
-            (CallableKind::User(a), CallableKind::User(b)) => {
+        match (&self, &other) {
+            (Callable::User(a), Callable::User(b)) => {
                 // compare raw pointers to FunctionDecl
-                a.decl == b.decl
+                a.decl_ptr == b.decl_ptr
             }
-            (CallableKind::BuiltIn(a), CallableKind::BuiltIn(b)) => Rc::ptr_eq(a, b),
+            (Callable::BuiltIn(_, a), Callable::BuiltIn(_, b)) => Rc::ptr_eq(a, b),
             _ => false,
         }
     }
@@ -148,11 +147,113 @@ impl PartialEq for Callable {
 
 impl std::fmt::Debug for Callable {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "{}", self.repr)
+        write!(f, "{}", self.to_string())
     }
 }
 
-type Shared<T> = Rc<RefCell<T>>;
+#[derive(Clone)]
+struct Instance {
+    class: Rc<Class>,
+    fields: HashMap<String, Value>,
+    self_rc: Weak<RefCell<Self>>,
+}
+
+impl Instance {
+    fn new_shared(class: Rc<Class>) -> Shared<Self> {
+        Rc::new_cyclic(|weak| {
+            RefCell::new(Self {
+                class: class.clone(),
+                fields: HashMap::new(),
+                self_rc: weak.clone(),
+            })
+        })
+    }
+
+    fn to_string(&self) -> String {
+        self.class.to_string() + " instance"
+    }
+
+    fn get(&self, name: &Token) -> Result<Value, String> {
+        if let Some(value) = self.fields.get(&name.lexeme) {
+            return Ok(value.clone());
+        }
+        self.class
+            .find_method(&name.lexeme)
+            .and_then(|m| m.bind_this(self.self_rc.upgrade().unwrap()))
+            .map(|m| m.as_value())
+            .map_err(|_| format!("Undefined property '{}'.", name.lexeme))
+    }
+
+    fn set(&mut self, name: &Token, value: &Value) -> Result<(), String> {
+        self.fields.insert(name.lexeme.clone(), value.clone());
+        Ok(())
+    }
+}
+
+impl PartialEq for Instance {
+    fn eq(&self, other: &Self) -> bool {
+        std::ptr::eq(self, other)
+    }
+}
+
+impl std::fmt::Debug for Instance {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "{}", self.to_string())
+    }
+}
+
+#[derive(Clone)]
+struct Class {
+    name: String,
+    methods: HashMap<String, UserFunction>,
+    self_rc: Weak<Self>,
+}
+
+impl Class {
+    fn new_rc(name: &String, methods: &HashMap<String, UserFunction>) -> Rc<Self> {
+        Rc::new_cyclic(|weak| Class {
+            name: name.clone(),
+            methods: methods.clone(),
+            self_rc: weak.clone(),
+        })
+    }
+
+    fn call(&self, interpreter: &mut Interpreter, arguments: &Vec<Value>) -> Result<Value, String> {
+        let class_rc = self.self_rc.upgrade().unwrap();
+        let instance = Instance::new_shared(class_rc);
+
+        // look for an "init" method and call it if found
+        self.find_method(&"init".to_string())
+            .and_then(|m| m.bind_this(instance.clone()))
+            .and_then(|m| m.call(interpreter, arguments))
+            .ok();
+
+        Ok(Value::Instance(instance.clone()))
+    }
+
+    fn find_method(&self, name: &String) -> Result<UserFunction, String> {
+        self.methods
+            .get(name)
+            .map(|method| method.clone())
+            .ok_or(format!("Undefined method '{}'", name))
+    }
+
+    fn arity(&self) -> usize {
+        self.find_method(&"init".to_string())
+            .map(|m| m.arity())
+            .unwrap_or(0)
+    }
+
+    fn to_string(&self) -> String {
+        format!("<class {}>", self.name)
+    }
+}
+
+impl PartialEq for Class {
+    fn eq(&self, _other: &Self) -> bool {
+        false
+    }
+}
 
 #[derive(Clone)]
 struct Environment {
@@ -175,9 +276,9 @@ impl Environment {
         }))
     }
 
-    fn get_from_ancestor(&self, distance: usize, name: &Token) -> Result<Value, String> {
+    fn get_from_ancestor(&self, distance: usize, name: &str) -> Result<Value, String> {
         if distance == 0 {
-            self.get(&name)
+            self.get(name)
         } else {
             match &self.enclosing {
                 Some(enclosing) => enclosing.borrow().get_from_ancestor(distance - 1, name),
@@ -189,11 +290,11 @@ impl Environment {
     fn set_in_ancestor(
         &mut self,
         distance: usize,
-        name: &Token,
+        name: &str,
         value: &Value,
     ) -> Result<(), String> {
         if distance == 0 {
-            self.set(&name, &value)
+            self.set(name, &value)
         } else {
             match &self.enclosing {
                 Some(enclosing) => {
@@ -206,32 +307,32 @@ impl Environment {
         }
     }
 
-    fn get(&self, name: &Token) -> Result<Value, String> {
-        if let Some(value) = self.values.get(&name.lexeme) {
+    fn get(&self, name: &str) -> Result<Value, String> {
+        if let Some(value) = self.values.get(name) {
             Ok(value.clone())
         } else if let Some(enclosing) = &self.enclosing {
-            enclosing.borrow().get(&name)
+            enclosing.borrow().get(name)
         } else {
-            Err(format!("Undefined variable '{}'.", &name.lexeme))
+            Err(format!("Undefined variable '{}'.", name))
         }
     }
 
-    fn set(&mut self, name: &Token, value: &Value) -> Result<(), String> {
-        if self.values.contains_key(&name.lexeme) {
-            self.values.insert(name.lexeme.clone(), value.clone());
+    fn set(&mut self, name: &str, value: &Value) -> Result<(), String> {
+        if self.values.contains_key(name) {
+            self.values.insert(name.to_string(), value.clone());
             Ok(())
         } else if let Some(enclosing) = &mut self.enclosing {
             enclosing.borrow_mut().set(name, value)
         } else {
-            Err(format!("Undefined variable '{}'.", &name.lexeme))
+            Err(format!("Undefined variable '{}'.", name))
         }
     }
 
-    fn define(&mut self, name: &Token, value: &Value) -> Result<(), String> {
-        if self.values.contains_key(&name.lexeme) {
-            Err(format!("Variable '{}' is already defined.", &name.lexeme))
+    fn define(&mut self, name: &str, value: &Value) -> Result<(), String> {
+        if self.values.contains_key(name) {
+            Err(format!("Variable '{}' is already defined.", name))
         } else {
-            self.values.insert(name.lexeme.clone(), value.clone());
+            self.values.insert(name.to_string(), value.clone());
             Ok(())
         }
     }
@@ -253,34 +354,78 @@ impl std::fmt::Debug for Environment {
 
 #[derive(Debug, Clone)]
 struct UserFunction {
-    decl: *const FunctionDeclaration,
+    decl_ptr: *const FunctionDeclaration,
     closure: Shared<Environment>,
+    is_initializer: bool,
 }
 
 impl UserFunction {
-    fn new(decl: &FunctionDeclaration, closure: Shared<Environment>) -> Self {
-        UserFunction { decl, closure }
+    fn new(decl: &FunctionDeclaration, closure: Shared<Environment>, is_initializer: bool) -> Self {
+        UserFunction {
+            decl_ptr: decl,
+            closure,
+            is_initializer,
+        }
+    }
+
+    fn decl(&self) -> &FunctionDeclaration {
+        // SAFETY: we know the FunctionDeclaration outlives the Interpreter
+        unsafe { &*self.decl_ptr }
+    }
+
+    fn as_value(&self) -> Value {
+        let callable = Callable::User(self.clone());
+        Value::Callable(callable)
     }
 
     fn call(&self, interpreter: &mut Interpreter, args: &Vec<Value>) -> Result<Value, String> {
         // create a new environment for the function call
         let env = Environment::new_shared_with_enclosing(self.closure.clone());
 
-        // SAFETY: we know the FunctionDeclaration outlives the Interpreter
-        let decl = unsafe { &*self.decl };
-
         // bind arguments to parameters
-        for (param, arg) in decl.parameters.iter().zip(args.iter()) {
-            env.borrow_mut().define(param, arg)?;
+        for (param, arg) in self.decl().parameters.iter().zip(args.iter()) {
+            env.borrow_mut().define(&param.lexeme, arg)?;
         }
 
         interpreter.with_environment(env, |interpreter| {
-            match interpreter.interpret_block_statement(&decl.body) {
+            // interpret the call
+            let result = match interpreter.interpret_block_statement(&self.decl().body) {
                 Ok(ControlFlow::Break(return_value)) => Ok(return_value),
                 Ok(ControlFlow::Continue(())) => Ok(Value::Nil),
                 Err(e) => Err(e),
+            };
+
+            // special case the init method to return this
+            if let Ok(value) = result {
+                if self.is_initializer {
+                    Ok(interpreter.current_environment.borrow().get("this")?)
+                } else {
+                    Ok(value)
+                }
+            } else {
+                result
             }
         })
+    }
+
+    fn bind_this(&self, this: Shared<Instance>) -> Result<Self, String> {
+        // create a new environment for the bound method
+        let env = Environment::new_shared_with_enclosing(self.closure.clone());
+
+        // point "this" at the instance
+        env.borrow_mut()
+            .define(&"this".to_string(), &Value::Instance(this))?;
+
+        // return a function with the new environment
+        Ok(Self::new(self.decl(), env, self.is_initializer))
+    }
+
+    fn arity(&self) -> usize {
+        self.decl().parameters.len()
+    }
+
+    fn to_string(&self) -> String {
+        format!("<fn {}>", self.decl().name.lexeme)
     }
 }
 
@@ -383,6 +528,33 @@ impl Interpreter {
         callee.call(self, &arguments)
     }
 
+    fn interpret_get_expression(&mut self, expr: &GetExpression) -> Result<Value, String> {
+        let object = self.interpret_expression(&expr.object)?;
+        match object {
+            Value::Instance(obj) => obj.borrow().get(&expr.name),
+            _ => Err("Only instances have properties.".to_string()),
+        }
+    }
+
+    fn interpret_set_expression(&mut self, expr: &SetExpression) -> Result<Value, String> {
+        let mut object = self.interpret_expression(&expr.object)?;
+        match &mut object {
+            Value::Instance(obj) => {
+                let value = self.interpret_expression(&expr.value)?;
+                obj.borrow_mut().set(&expr.name, &value)?;
+                Ok(value)
+            }
+            _ => Err("Only instances have properties.".to_string()),
+        }
+    }
+
+    fn interpret_this_expression(&mut self, expr: &ThisExpression) -> Result<Value, String> {
+        let ancestor = self.name_resolver.lookup(&expr.keyword)?;
+        self.current_environment
+            .borrow()
+            .get_from_ancestor(ancestor, &expr.keyword.lexeme)
+    }
+
     fn interpret_unary_expression(&mut self, expr: &UnaryExpression) -> Result<Value, String> {
         let value = self.interpret_expression(&*expr.expr)?;
         match expr.op.kind {
@@ -393,10 +565,10 @@ impl Interpreter {
     }
 
     fn interpret_variable(&mut self, var: &Variable) -> Result<Value, String> {
-        let ancestor = self.name_resolver.lookup(&var)?;
+        let ancestor = self.name_resolver.lookup(&var.name)?;
         self.current_environment
             .borrow()
-            .get_from_ancestor(ancestor, &var.name)
+            .get_from_ancestor(ancestor, &var.name.lexeme)
     }
 
     fn interpret_assignment_expression(
@@ -404,10 +576,12 @@ impl Interpreter {
         expr: &AssignmentExpression,
     ) -> Result<Value, String> {
         let value = self.interpret_expression(&*expr.expr)?;
-        let ancestor = self.name_resolver.lookup(&expr.var)?;
-        self.current_environment
-            .borrow_mut()
-            .set_in_ancestor(ancestor, &expr.var.name, &value)?;
+        let ancestor = self.name_resolver.lookup(&expr.var.name)?;
+        self.current_environment.borrow_mut().set_in_ancestor(
+            ancestor,
+            &expr.var.name.lexeme,
+            &value,
+        )?;
         Ok(value)
     }
 
@@ -416,25 +590,40 @@ impl Interpreter {
             Expression::Assignment(expr) => self.interpret_assignment_expression(expr),
             Expression::Binary(expr) => self.interpret_binary_expression(expr),
             Expression::Call(expr) => self.interpret_call_expression(expr),
+            Expression::Get(g) => self.interpret_get_expression(g),
             Expression::Grouping(g) => self.interpret_grouping_expression(g),
             Expression::Literal(l) => self.interpret_literal(l),
             Expression::Logical(expr) => self.interpret_logical_expression(expr),
+            Expression::Set(s) => self.interpret_set_expression(s),
+            Expression::This(t) => self.interpret_this_expression(t),
             Expression::Unary(expr) => self.interpret_unary_expression(expr),
             Expression::Variable(var) => self.interpret_variable(var),
         }
     }
 
-    fn interpret_function_declaration(&mut self, decl: &FunctionDeclaration) -> Result<(), String> {
-        let repr = format!("<fn {}>", decl.name.lexeme);
-        let func = UserFunction::new(decl, self.current_environment.clone());
-        let callable = Value::Callable(Callable::new_user_function(
-            decl.parameters.len(),
-            repr,
-            func,
-        ));
+    fn interpret_class_declaration(&mut self, decl: &ClassDeclaration) -> Result<(), String> {
+        let mut methods = HashMap::new();
+        for method_decl in &decl.methods {
+            let callable = UserFunction::new(
+                method_decl,
+                self.current_environment.clone(),
+                method_decl.name.lexeme == "init",
+            );
+            methods.insert(method_decl.name.lexeme.clone(), callable);
+        }
+        let class = Class::new_rc(&decl.name.lexeme, &methods);
+        let callable = Value::Callable(Callable::Class(class));
         self.current_environment
             .borrow_mut()
-            .define(&decl.name, &callable)
+            .define(&decl.name.lexeme, &callable)
+    }
+
+    fn interpret_function_declaration(&mut self, decl: &FunctionDeclaration) -> Result<(), String> {
+        let function = UserFunction::new(decl, self.current_environment.clone(), false);
+        let callable = Callable::User(function);
+        self.current_environment
+            .borrow_mut()
+            .define(&decl.name.lexeme, &Value::Callable(callable))
     }
 
     fn interpret_variable_declaration(&mut self, decl: &VariableDeclaration) -> Result<(), String> {
@@ -444,11 +633,12 @@ impl Interpreter {
         };
         self.current_environment
             .borrow_mut()
-            .define(&decl.name, &value)
+            .define(&decl.name.lexeme, &value)
     }
 
     fn interpret_declaration(&mut self, decl: &Declaration) -> Result<(), String> {
         match decl {
+            Declaration::Class(c) => self.interpret_class_declaration(c),
             Declaration::Function(f) => self.interpret_function_declaration(f),
             Declaration::Variable(v) => self.interpret_variable_declaration(v),
         }

@@ -4,11 +4,19 @@ use std::ptr::NonNull;
 use crate::syntax::*;
 use crate::token::Token;
 
-// for now, just keep track of whether the a scope is the global scope or a function scope
+#[derive(Debug)]
+enum FunctionKind {
+    Initializer,
+    Normal,
+    Method,
+}
+
+#[derive(Debug)]
 enum ScopeKind {
     Block,
+    Class,
     Global,
-    Function,
+    Function(FunctionKind),
 }
 
 struct Scope {
@@ -20,16 +28,20 @@ struct Scope {
 
 impl Scope {
     fn new(kind: ScopeKind) -> Self {
-        Self { kind, names: HashMap::new() }
+        Self {
+            kind,
+            names: HashMap::new(),
+        }
     }
 }
 
 pub struct NameResolver {
-    // maps each resolved name to the scope in which its referent is defined
-    symbol_table: HashMap<NonNull<Variable>, usize>,
+    // maps the address of a Token in the AST
+    // (which must be a field of either a Variable or ThisExpression node)
+    // to the scope in which its referent is defined
+    symbol_table: HashMap<NonNull<Token>, usize>,
 
     // a scope maps a name to whether or not it has been defined
-    // XXX we should also track the type of scope we're in
     scopes: Vec<Scope>,
 }
 
@@ -41,14 +53,40 @@ impl NameResolver {
         }
     }
 
-    pub fn lookup(&self, var: &Variable) -> Result<usize, String> {
-        match self.symbol_table.get(&NonNull::from(var)) {
-            Some(&depth) => Ok(depth),
-            None => Err(format!(
-                "Internal error: variable '{}' was not resolved",
-                var.name.lexeme
-            )),
+    fn is_inside_class(&self) -> bool {
+        for scope in self.scopes.iter().rev() {
+            if let ScopeKind::Class = scope.kind {
+                return true;
+            }
         }
+        false
+    }
+
+    fn innermost_function_scope(&self) -> Option<&Scope> {
+        for scope in self.scopes.iter().rev() {
+            match scope.kind {
+                ScopeKind::Function(_) => return Some(&scope),
+                _ => continue,
+            }
+        }
+        None
+    }
+
+    fn is_inside_initializer(&self) -> bool {
+        match &self.innermost_function_scope() {
+            None => false,
+            Some(scope) => match scope.kind {
+                ScopeKind::Function(FunctionKind::Initializer) => true,
+                _ => false,
+            },
+        }
+    }
+
+    pub fn lookup(&self, name: &Token) -> Result<usize, String> {
+        self.symbol_table
+            .get(&NonNull::from(name))
+            .copied()
+            .ok_or(format!("Internal error: '{}' was not resolved", name.lexeme).to_string())
     }
 
     fn with_new_scope<T>(
@@ -62,66 +100,64 @@ impl NameResolver {
         result
     }
 
-    fn declare(&mut self, name: &Token) -> Result<(), String> {
+    fn declare(&mut self, name: &String) -> Result<(), String> {
         if self.scopes.is_empty() {
-            return Err("Cannot declare variable outside of a scope".to_string());
+            return Err("Cannot declare name outside of a scope".to_string());
         }
 
-        if self.scopes.last().unwrap().names.contains_key(&name.lexeme) {
-            return Err(format!(
-                "Variable '{}' is already declared in this scope",
-                name.lexeme
-            ));
+        if self.scopes.last().unwrap().names.contains_key(name) {
+            return Err(format!("'{}' is already declared in this scope", name));
         }
 
         self.scopes
             .last_mut()
             .unwrap()
             .names
-            .insert(name.lexeme.clone(), false);
+            .insert(name.clone(), false);
         Ok(())
     }
 
-    fn define(&mut self, name: &Token) -> Result<(), String> {
+    fn define(&mut self, name: &String) -> Result<(), String> {
         if self.scopes.is_empty() {
-            return Err("Cannot define variable outside of a scope".to_string());
+            return Err("Cannot define name outside of a scope".to_string());
         }
 
         let scope = self.scopes.last_mut().unwrap();
 
-        if !scope.names.contains_key(&name.lexeme) {
-            return Err(format!(
-                "Cannot define variable '{}' before declaration",
-                name.lexeme
-            ));
+        if !scope.names.contains_key(name) {
+            return Err(format!("Cannot define '{}' before declaration", name));
         }
 
-        scope.names.insert(name.lexeme.clone(), true);
+        scope.names.insert(name.clone(), true);
         Ok(())
     }
 
-    fn resolve_variable(&mut self, variable: &Variable) -> Result<(), String> {
+    fn resolve_name(&mut self, name: &Token) -> Result<(), String> {
         if self.scopes.is_empty() {
-            return Err("Cannot resolve variable outside of a scope".to_string());
+            return Err("Cannot resolve name outside of a scope".to_string());
         }
 
         // look through each scope, starting at the top of
         // the stack for a declaration for name, and note
         // the location of its scope if found
         for i in (0..self.scopes.len()).rev() {
-            if self.scopes[i].names.contains_key(&variable.name.lexeme) {
+            if self.scopes[i].names.contains_key(&name.lexeme) {
                 // we record the distance that we need to "climb" from
                 // the innermost scope to find the name's referent
                 self.symbol_table
-                    .insert(NonNull::from(variable), self.scopes.len() - 1 - i);
+                    .insert(NonNull::from(name), self.scopes.len() - 1 - i);
                 return Ok(());
             }
         }
 
         Err(format!(
-            "Name resolution error: Variable '{}' is undefined",
-            variable.name.lexeme
+            "Name resolution error: Name '{}' is undefined",
+            name.lexeme
         ))
+    }
+
+    fn resolve_variable(&mut self, variable: &Variable) -> Result<(), String> {
+        self.resolve_name(&variable.name)
     }
 
     fn resolve_literal(&mut self, _lit: &Literal) -> Result<(), String> {
@@ -135,6 +171,10 @@ impl NameResolver {
     fn resolve_binary_expression(&mut self, expr: &BinaryExpression) -> Result<(), String> {
         self.resolve_expression(&expr.left_expr)?;
         self.resolve_expression(&expr.right_expr)
+    }
+
+    fn resolve_get_expression(&mut self, expr: &GetExpression) -> Result<(), String> {
+        self.resolve_expression(&expr.object)
     }
 
     fn resolve_grouping_expression(&mut self, expr: &GroupingExpression) -> Result<(), String> {
@@ -159,14 +199,29 @@ impl NameResolver {
         Ok(())
     }
 
+    fn resolve_set_expression(&mut self, expr: &SetExpression) -> Result<(), String> {
+        self.resolve_expression(&expr.value)?;
+        self.resolve_expression(&*expr.object)
+    }
+
+    fn resolve_this_expression(&mut self, expr: &ThisExpression) -> Result<(), String> {
+        if !self.is_inside_class() {
+            return Err("Can't use 'this' outside of a class".to_string());
+        }
+        self.resolve_name(&expr.keyword)
+    }
+
     fn resolve_expression(&mut self, expr: &Expression) -> Result<(), String> {
         match expr {
             Expression::Assignment(a) => self.resolve_assignment_expression(a),
             Expression::Binary(b) => self.resolve_binary_expression(b),
             Expression::Call(c) => self.resolve_call_expression(c),
+            Expression::Get(g) => self.resolve_get_expression(g),
             Expression::Grouping(g) => self.resolve_grouping_expression(g),
             Expression::Literal(l) => self.resolve_literal(l),
             Expression::Logical(l) => self.resolve_logical_expression(l),
+            Expression::Set(s) => self.resolve_set_expression(s),
+            Expression::This(t) => self.resolve_this_expression(t),
             Expression::Unary(u) => self.resolve_unary_expression(u),
             Expression::Variable(v) => self.resolve_variable(v),
         }
@@ -174,7 +229,8 @@ impl NameResolver {
 
     fn resolve_declaration(&mut self, decl: &Declaration) -> Result<(), String> {
         match decl {
-            Declaration::Function(f) => self.resolve_function_declaration(f),
+            Declaration::Class(c) => self.resolve_class_declaration(c),
+            Declaration::Function(f) => self.resolve_function_declaration(f, FunctionKind::Normal),
             Declaration::Variable(v) => self.resolve_variable_declaration(v),
         }
     }
@@ -186,6 +242,12 @@ impl NameResolver {
     fn resolve_return_statement(&mut self, stmt: &ReturnStatement) -> Result<(), String> {
         if self.scopes.is_empty() {
             return Err("Cannot resolve return outside of a scope".to_string());
+        }
+
+        if self.is_inside_initializer() {
+            if stmt.expr.is_some() {
+                return Err("Can't return a value from an initializer.".to_string());
+            }
         }
 
         let scope = self.scopes.last().unwrap();
@@ -218,6 +280,24 @@ impl NameResolver {
         })
     }
 
+    fn resolve_class_declaration(&mut self, class: &ClassDeclaration) -> Result<(), String> {
+        self.declare(&class.name.lexeme)?;
+        self.with_new_scope(ScopeKind::Class, |slf| {
+            slf.declare(&"this".to_string())?;
+            slf.define(&"this".to_string())?;
+            for method in &class.methods {
+                let kind = if method.name.lexeme == "init" {
+                    FunctionKind::Initializer
+                } else {
+                    FunctionKind::Method
+                };
+                slf.resolve_function_declaration(&method, kind)?;
+            }
+            Ok(())
+        })?;
+        self.define(&class.name.lexeme)
+    }
+
     fn resolve_for_statement(&mut self, stmt: &ForStatement) -> Result<(), String> {
         if let Some(initializer) = &stmt.initializer {
             self.resolve_statement(&*initializer)?;
@@ -231,14 +311,18 @@ impl NameResolver {
         self.resolve_statement(&*stmt.body)
     }
 
-    fn resolve_function_declaration(&mut self, decl: &FunctionDeclaration) -> Result<(), String> {
-        self.declare(&decl.name)?;
-        self.define(&decl.name)?;
+    fn resolve_function_declaration(
+        &mut self,
+        decl: &FunctionDeclaration,
+        kind: FunctionKind,
+    ) -> Result<(), String> {
+        self.declare(&decl.name.lexeme)?;
+        self.define(&decl.name.lexeme)?;
 
-        self.with_new_scope(ScopeKind::Function, |slf| {
+        self.with_new_scope(ScopeKind::Function(kind), |slf| {
             for param in &decl.parameters {
-                slf.declare(param)?;
-                slf.define(param)?;
+                slf.declare(&param.lexeme)?;
+                slf.define(&param.lexeme)?;
             }
             slf.resolve_block_statement(&decl.body)
         })
@@ -254,11 +338,11 @@ impl NameResolver {
     }
 
     fn resolve_variable_declaration(&mut self, decl: &VariableDeclaration) -> Result<(), String> {
-        self.declare(&decl.name)?;
+        self.declare(&decl.name.lexeme)?;
         if let Some(init) = &decl.initializer {
             self.resolve_expression(init)?;
         }
-        self.define(&decl.name)
+        self.define(&decl.name.lexeme)
     }
 
     fn resolve_while_statement(&mut self, stmt: &WhileStatement) -> Result<(), String> {
