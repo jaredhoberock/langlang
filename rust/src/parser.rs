@@ -212,7 +212,20 @@ impl<'a> Parser<'a> {
         Err(ParseError::combine(errors))
     }
 
-    // primary_expression := literal | grouping_expression | this | variable
+    // super_expression := "super" "." identifier
+    #[restore_self_on_err]
+    fn super_expression(&mut self) -> Result<SuperExpression, ParseError> {
+        let keyword = self.token(TokenKind::Super)?;
+        let _dot = self
+            .token(TokenKind::Dot)
+            .map_err(ParseError::format_message("{} after 'super'"))?;
+        let method = self.identifier().map_err(ParseError::format_message(
+            "Expected superclass method name",
+        ))?;
+        Ok(SuperExpression { keyword, method })
+    }
+
+    // primary_expression := literal | grouping_expression | super_expression | this | variable
     #[restore_self_on_err]
     fn primary_expression(&mut self) -> Result<Expression, ParseError> {
         let literal = self.literal();
@@ -223,6 +236,11 @@ impl<'a> Parser<'a> {
         let grouping = self.grouping_expression();
         if grouping.is_ok() {
             return grouping.map(Expression::Grouping);
+        }
+
+        let super_ = self.super_expression();
+        if super_.is_ok() {
+            return super_.map(Expression::Super);
         }
 
         let this = self.this();
@@ -238,6 +256,7 @@ impl<'a> Parser<'a> {
         let errors = vec![
             literal.unwrap_err(),
             grouping.unwrap_err(),
+            super_.unwrap_err(),
             this.unwrap_err(),
             var.unwrap_err(),
         ];
@@ -543,13 +562,19 @@ impl<'a> Parser<'a> {
         })
     }
 
-    // class_declaration := "class" identifier "{" function_declaration* "}"
+    // class_declaration := "class" identifier ( "<" identifier )? "{" function_declaration* "}"
     #[restore_self_on_err]
     fn class_declaration(&mut self) -> Result<Declaration, ParseError> {
         let _class = self
             .token(TokenKind::Class)
             .map_err(ParseError::format_message("{} before class name"))?;
         let name = self.identifier()?;
+        let mut superclass = None;
+        if self.token(TokenKind::Less).is_ok() {
+            superclass = Some(self.identifier().map_err(ParseError::format_message(
+                "{} as superclass name after '<'",
+            ))?);
+        }
         let _lbrace = self
             .token(TokenKind::LeftBrace)
             .map_err(ParseError::format_message("{} before class body"))?;
@@ -564,7 +589,11 @@ impl<'a> Parser<'a> {
             methods.push(self.function_declaration()?);
         }
 
-        Ok(Declaration::Class(ClassDeclaration { name, methods }))
+        Ok(Declaration::Class(ClassDeclaration {
+            name,
+            superclass,
+            methods,
+        }))
     }
 
     // variable_declaration := "var" identifier ( "=" expression )? ";"

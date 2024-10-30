@@ -54,6 +54,12 @@ pub struct LogicalExpression {
 }
 
 #[derive(Debug)]
+pub struct SuperExpression {
+    pub keyword: Token,
+    pub method: Token,
+}
+
+#[derive(Debug)]
 pub struct SetExpression {
     pub object: Box<Expression>,
     pub name: Token,
@@ -81,6 +87,7 @@ pub enum Expression {
     Literal(Literal),
     Logical(LogicalExpression),
     Set(SetExpression),
+    Super(SuperExpression),
     This(ThisExpression),
     Unary(UnaryExpression),
     Variable(Variable),
@@ -89,6 +96,7 @@ pub enum Expression {
 #[derive(Debug)]
 pub struct ClassDeclaration {
     pub name: Token,
+    pub superclass: Option<Token>,
     pub methods: Vec<FunctionDeclaration>,
 }
 

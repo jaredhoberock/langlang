@@ -20,6 +20,12 @@ enum Value {
     String(String),
 }
 
+impl From<Rc<Class>> for Value {
+    fn from(class: Rc<Class>) -> Self {
+        Value::Callable(Callable::Class(class))
+    }
+}
+
 impl Value {
     fn as_bool(&self) -> bool {
         match self {
@@ -205,14 +211,20 @@ impl std::fmt::Debug for Instance {
 #[derive(Clone)]
 struct Class {
     name: String,
+    superclass: Option<Rc<Self>>,
     methods: HashMap<String, UserFunction>,
     self_rc: Weak<Self>,
 }
 
 impl Class {
-    fn new_rc(name: &String, methods: &HashMap<String, UserFunction>) -> Rc<Self> {
-        Rc::new_cyclic(|weak| Class {
+    fn new_rc(
+        name: &String,
+        superclass: &Option<Rc<Self>>,
+        methods: &HashMap<String, UserFunction>,
+    ) -> Rc<Self> {
+        Rc::new_cyclic(|weak| Self {
             name: name.clone(),
+            superclass: superclass.clone(),
             methods: methods.clone(),
             self_rc: weak.clone(),
         })
@@ -232,10 +244,11 @@ impl Class {
     }
 
     fn find_method(&self, name: &String) -> Result<UserFunction, String> {
-        self.methods
-            .get(name)
-            .map(|method| method.clone())
-            .ok_or(format!("Undefined method '{}'", name))
+        match (self.methods.get(name), &self.superclass) {
+            (Some(method), _) => Ok(method.clone()),
+            (None, Some(superclass)) => superclass.find_method(name),
+            (None, None) => Err(format!("Undefined method '{}'", name)),
+        }
     }
 
     fn arity(&self) -> usize {
@@ -459,6 +472,24 @@ impl Interpreter {
         self.with_environment(env, f)
     }
 
+    // if condition is true,
+    //     self.with_environment(new_env, f)
+    //     where new_env is a new environment with self.current_environment as its enclosing
+    //     environment
+    // otherwise,
+    //     self.with_environment(self.current_environment, f)
+    fn with_enclosed_environment_if<T>(
+        &mut self,
+        condition: bool,
+        f: impl FnOnce(&mut Self) -> T,
+    ) -> T {
+        if condition {
+            self.with_enclosed_environment(f)
+        } else {
+            f(self)
+        }
+    }
+
     fn interpret_literal(&self, lit: &Literal) -> Result<Value, String> {
         Ok(match lit {
             Literal::Bool(b) => Value::Bool(*b),
@@ -548,11 +579,44 @@ impl Interpreter {
         }
     }
 
-    fn interpret_this_expression(&mut self, expr: &ThisExpression) -> Result<Value, String> {
-        let ancestor = self.name_resolver.lookup(&expr.keyword)?;
-        self.current_environment
+    fn interpret_name_with_ancestor(&mut self, name: &Token) -> Result<(Value, usize), String> {
+        let ancestor = self.name_resolver.lookup(&name)?;
+        let result = self
+            .current_environment
             .borrow()
-            .get_from_ancestor(ancestor, &expr.keyword.lexeme)
+            .get_from_ancestor(ancestor, &name.lexeme)?;
+        Ok((result, ancestor))
+    }
+
+    fn interpret_name(&mut self, name: &Token) -> Result<Value, String> {
+        self.interpret_name_with_ancestor(name)
+            .map(|(result, _)| result)
+    }
+
+    fn interpret_super_expression(&mut self, expr: &SuperExpression) -> Result<Value, String> {
+        // look up the value of "super" and get which ancestor we found it in
+        let (superclass, ancestor) = match self.interpret_name_with_ancestor(&expr.keyword)? {
+            (Value::Callable(Callable::Class(c)), a) => (c, a),
+            _ => unreachable!("'super' should evaluate to a class."),
+        };
+        // look up the value of "this" at one scope below where we found "super"
+        let instance = match self
+            .current_environment
+            .borrow()
+            .get_from_ancestor(ancestor - 1, "this")?
+        {
+            Value::Instance(instance) => instance,
+            _ => unreachable!("'this' should evaluate to an instance."),
+        };
+        // look up the method in superclass and bind instance as "this"
+        superclass
+            .find_method(&expr.method.lexeme)?
+            .bind_this(instance.clone())
+            .map(|m| Value::Callable(Callable::User(m)))
+    }
+
+    fn interpret_this_expression(&mut self, expr: &ThisExpression) -> Result<Value, String> {
+        self.interpret_name(&expr.keyword)
     }
 
     fn interpret_unary_expression(&mut self, expr: &UnaryExpression) -> Result<Value, String> {
@@ -565,10 +629,7 @@ impl Interpreter {
     }
 
     fn interpret_variable(&mut self, var: &Variable) -> Result<Value, String> {
-        let ancestor = self.name_resolver.lookup(&var.name)?;
-        self.current_environment
-            .borrow()
-            .get_from_ancestor(ancestor, &var.name.lexeme)
+        self.interpret_name(&var.name)
     }
 
     fn interpret_assignment_expression(
@@ -595,6 +656,7 @@ impl Interpreter {
             Expression::Literal(l) => self.interpret_literal(l),
             Expression::Logical(expr) => self.interpret_logical_expression(expr),
             Expression::Set(s) => self.interpret_set_expression(s),
+            Expression::Super(s) => self.interpret_super_expression(s),
             Expression::This(t) => self.interpret_this_expression(t),
             Expression::Unary(expr) => self.interpret_unary_expression(expr),
             Expression::Variable(var) => self.interpret_variable(var),
@@ -602,20 +664,46 @@ impl Interpreter {
     }
 
     fn interpret_class_declaration(&mut self, decl: &ClassDeclaration) -> Result<(), String> {
-        let mut methods = HashMap::new();
-        for method_decl in &decl.methods {
-            let callable = UserFunction::new(
-                method_decl,
-                self.current_environment.clone(),
-                method_decl.name.lexeme == "init",
-            );
-            methods.insert(method_decl.name.lexeme.clone(), callable);
-        }
-        let class = Class::new_rc(&decl.name.lexeme, &methods);
-        let callable = Value::Callable(Callable::Class(class));
+        // get superclass if one is specified
+        let superclass = match &decl.superclass {
+            Some(name) => match self.interpret_name(name)? {
+                Value::Callable(Callable::Class(c)) => Some(c.clone()),
+                _ => return Err("Superclass must be a class.".to_string()),
+            },
+            None => None,
+        };
+
+        // if a superclass is specified, interpret the following with an enclosed environment
+        let class = self.with_enclosed_environment_if(
+            superclass.is_some(),
+            |slf| -> Result<Value, String> {
+                if let Some(s) = &superclass {
+                    slf.current_environment
+                        .borrow_mut()
+                        .define("super", &Value::from(s.clone()))?;
+                };
+
+                let mut methods = HashMap::new();
+                for method_decl in &decl.methods {
+                    let callable = UserFunction::new(
+                        method_decl,
+                        slf.current_environment.clone(),
+                        method_decl.name.lexeme == "init",
+                    );
+                    methods.insert(method_decl.name.lexeme.clone(), callable);
+                }
+
+                Ok(Value::from(Class::new_rc(
+                    &decl.name.lexeme,
+                    &superclass,
+                    &methods,
+                )))
+            },
+        )?;
+
         self.current_environment
             .borrow_mut()
-            .define(&decl.name.lexeme, &callable)
+            .define(&decl.name.lexeme, &class)
     }
 
     fn interpret_function_declaration(&mut self, decl: &FunctionDeclaration) -> Result<(), String> {

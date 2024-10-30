@@ -4,19 +4,23 @@ use std::ptr::NonNull;
 use crate::syntax::*;
 use crate::token::Token;
 
-#[derive(Debug)]
+enum ClassKind {
+    Normal,
+    Subclass,
+}
+
 enum FunctionKind {
     Initializer,
     Normal,
     Method,
 }
 
-#[derive(Debug)]
 enum ScopeKind {
     Block,
-    Class,
+    Class(ClassKind),
     Global,
     Function(FunctionKind),
+    Super,
 }
 
 struct Scope {
@@ -53,13 +57,18 @@ impl NameResolver {
         }
     }
 
-    fn is_inside_class(&self) -> bool {
+    fn innermost_class_scope(&self) -> Option<&Scope> {
         for scope in self.scopes.iter().rev() {
-            if let ScopeKind::Class = scope.kind {
-                return true;
+            match scope.kind {
+                ScopeKind::Class(_) => return Some(&scope),
+                _ => continue,
             }
         }
-        false
+        None
+    }
+
+    fn is_inside_class(&self) -> bool {
+        self.innermost_class_scope().is_some()
     }
 
     fn innermost_function_scope(&self) -> Option<&Scope> {
@@ -89,47 +98,66 @@ impl NameResolver {
             .ok_or(format!("Internal error: '{}' was not resolved", name.lexeme).to_string())
     }
 
+    // this wraps the invocation of f(self) in a new scope of the given kind if the condition is true
+    // f(self) is invoked in either case
+    // returns the result of f(self)
+    fn with_new_scope_if<T>(
+        &mut self,
+        condition: bool,
+        kind: ScopeKind,
+        f: impl FnOnce(&mut Self) -> Result<T, String>,
+    ) -> Result<T, String> {
+        if condition {
+            self.scopes.push(Scope::new(kind));
+        }
+        let result = f(self);
+        if condition {
+            self.scopes.pop();
+        }
+        result
+    }
+
+    // this wraps the invocation of f(self) in a new scope of the given kind
+    // returns the result of f(self)
     fn with_new_scope<T>(
         &mut self,
         kind: ScopeKind,
         f: impl FnOnce(&mut Self) -> Result<T, String>,
     ) -> Result<T, String> {
-        self.scopes.push(Scope::new(kind));
-        let result = f(self);
-        self.scopes.pop();
-        result
+        self.with_new_scope_if(true, kind, f)
     }
 
-    fn declare(&mut self, name: &String) -> Result<(), String> {
-        if self.scopes.is_empty() {
-            return Err("Cannot declare name outside of a scope".to_string());
-        }
+    fn declare(&mut self, name: &str) -> Result<(), String> {
+        let scope = self
+            .scopes
+            .last_mut()
+            .ok_or("Cannot declare name outside of a scope")?;
 
-        if self.scopes.last().unwrap().names.contains_key(name) {
+        if scope.names.contains_key(name) {
             return Err(format!("'{}' is already declared in this scope", name));
         }
 
-        self.scopes
-            .last_mut()
-            .unwrap()
-            .names
-            .insert(name.clone(), false);
+        scope.names.insert(name.to_string(), false);
         Ok(())
     }
 
-    fn define(&mut self, name: &String) -> Result<(), String> {
-        if self.scopes.is_empty() {
-            return Err("Cannot define name outside of a scope".to_string());
-        }
-
-        let scope = self.scopes.last_mut().unwrap();
+    fn define(&mut self, name: &str) -> Result<(), String> {
+        let scope = self
+            .scopes
+            .last_mut()
+            .ok_or("Cannot define name outside of a scope")?;
 
         if !scope.names.contains_key(name) {
             return Err(format!("Cannot define '{}' before declaration", name));
         }
 
-        scope.names.insert(name.clone(), true);
+        scope.names.insert(name.to_string(), true);
         Ok(())
+    }
+
+    fn declare_defined(&mut self, name: &str) -> Result<(), String> {
+        self.declare(name)?;
+        self.define(name)
     }
 
     fn resolve_name(&mut self, name: &Token) -> Result<(), String> {
@@ -204,6 +232,16 @@ impl NameResolver {
         self.resolve_expression(&*expr.object)
     }
 
+    fn resolve_super_expression(&mut self, expr: &SuperExpression) -> Result<(), String> {
+        match self.innermost_class_scope() {
+            Some(scope) if matches!(scope.kind, ScopeKind::Class(ClassKind::Subclass)) => {
+                self.resolve_name(&expr.keyword)
+            }
+            Some(_) => Err("Can't use 'super' in a class with no superclass.".to_string()),
+            None => Err("Can't use 'super' outside of a class.".to_string()),
+        }
+    }
+
     fn resolve_this_expression(&mut self, expr: &ThisExpression) -> Result<(), String> {
         if !self.is_inside_class() {
             return Err("Can't use 'this' outside of a class".to_string());
@@ -221,6 +259,7 @@ impl NameResolver {
             Expression::Literal(l) => self.resolve_literal(l),
             Expression::Logical(l) => self.resolve_logical_expression(l),
             Expression::Set(s) => self.resolve_set_expression(s),
+            Expression::Super(s) => self.resolve_super_expression(s),
             Expression::This(t) => self.resolve_this_expression(t),
             Expression::Unary(u) => self.resolve_unary_expression(u),
             Expression::Variable(v) => self.resolve_variable(v),
@@ -282,18 +321,33 @@ impl NameResolver {
 
     fn resolve_class_declaration(&mut self, class: &ClassDeclaration) -> Result<(), String> {
         self.declare(&class.name.lexeme)?;
-        self.with_new_scope(ScopeKind::Class, |slf| {
-            slf.declare(&"this".to_string())?;
-            slf.define(&"this".to_string())?;
-            for method in &class.methods {
-                let kind = if method.name.lexeme == "init" {
-                    FunctionKind::Initializer
-                } else {
-                    FunctionKind::Method
-                };
-                slf.resolve_function_declaration(&method, kind)?;
+        if let Some(superclass_name) = &class.superclass {
+            if superclass_name.lexeme == class.name.lexeme {
+                return Err("A class can't inherit from itself.".to_string());
             }
-            Ok(())
+            self.resolve_name(&superclass_name)?;
+        }
+        self.with_new_scope_if(class.superclass.is_some(), ScopeKind::Super, |slf| {
+            if class.superclass.is_some() {
+                slf.declare_defined("super")?;
+            }
+            let class_scope_kind = if class.superclass.is_some() {
+                ScopeKind::Class(ClassKind::Subclass)
+            } else {
+                ScopeKind::Class(ClassKind::Normal)
+            };
+            slf.with_new_scope(class_scope_kind, |slf| {
+                slf.declare_defined("this")?;
+                for method in &class.methods {
+                    let kind = if method.name.lexeme == "init" {
+                        FunctionKind::Initializer
+                    } else {
+                        FunctionKind::Method
+                    };
+                    slf.resolve_function_declaration(&method, kind)?;
+                }
+                Ok(())
+            })
         })?;
         self.define(&class.name.lexeme)
     }
