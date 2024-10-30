@@ -4,17 +4,20 @@ use std::ptr::NonNull;
 use crate::syntax::*;
 use crate::token::Token;
 
+#[derive(PartialEq)]
 enum ClassKind {
     Normal,
     Subclass,
 }
 
+#[derive(PartialEq)]
 enum FunctionKind {
     Initializer,
     Normal,
     Method,
 }
 
+#[derive(PartialEq)]
 enum ScopeKind {
     Block,
     Class(ClassKind),
@@ -50,10 +53,16 @@ pub struct NameResolver {
 }
 
 impl NameResolver {
-    pub fn new() -> Self {
+    pub fn new(initial_globals: Vec<String>) -> Self {
         Self {
             symbol_table: HashMap::new(),
-            scopes: Vec::new(),
+            scopes: vec![Scope {
+                kind: ScopeKind::Global,
+                names: initial_globals
+                    .into_iter()
+                    .map(|name| (name, true))
+                    .collect(),
+            }],
         }
     }
 
@@ -419,21 +428,20 @@ impl NameResolver {
     }
 
     pub fn resolve_program(&mut self, prog: &Program) -> Result<(), String> {
-        if !self.scopes.is_empty() {
-            return Err("Internal error: scopes should be empty at start of program".to_string());
+        if !(self.scopes.len() == 1 && self.scopes[0].kind == ScopeKind::Global) {
+            return Err(
+                "Internal error: expected single global scope at start of program.".to_string(),
+            );
         }
 
-        self.with_new_scope(ScopeKind::Global, |slf| {
-            for stmt in &prog.statements {
-                slf.resolve_statement(stmt)?;
-            }
+        for stmt in &prog.statements {
+            self.resolve_statement(stmt)?;
+        }
+
+        if self.scopes.len() == 1 && self.scopes[0].kind == ScopeKind::Global {
             Ok(())
-        })?;
-
-        if !self.scopes.is_empty() {
-            return Err("Internal error: scopes should be empty at end of program".to_string());
+        } else {
+            Err("Internal error: expected single global scope at end of program.".to_string())
         }
-
-        Ok(())
     }
 }

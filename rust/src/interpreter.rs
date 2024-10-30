@@ -97,26 +97,26 @@ impl std::fmt::Display for Value {
 
 #[derive(Clone)]
 enum Callable {
-    BuiltIn(
+    Class(Rc<Class>),
+    Native(
         usize,
         Rc<dyn Fn(&mut Interpreter, &Vec<Value>) -> Result<Value, String>>,
     ),
-    Class(Rc<Class>),
     User(UserFunction),
 }
 
 impl Callable {
-    fn new_built_in_function<F>(arity: usize, func: F) -> Self
+    fn new_native_function<F>(arity: usize, func: F) -> Self
     where
         F: Fn(&mut Interpreter, &Vec<Value>) -> Result<Value, String> + 'static,
     {
-        Self::BuiltIn(arity, Rc::new(func))
+        Self::Native(arity, Rc::new(func))
     }
 
     fn call(&self, interp: &mut Interpreter, arguments: &Vec<Value>) -> Result<Value, String> {
         match &self {
-            Callable::BuiltIn(_arity, f) => f(interp, arguments),
             Callable::Class(c) => c.call(interp, arguments),
+            Callable::Native(_arity, f) => f(interp, arguments),
             Callable::User(f) => f.call(interp, arguments),
         }
     }
@@ -124,16 +124,16 @@ impl Callable {
     fn arity(&self) -> usize {
         match &self {
             Callable::Class(c) => c.arity(),
+            Callable::Native(arity, _) => *arity,
             Callable::User(f) => f.arity(),
-            Callable::BuiltIn(arity, _) => *arity,
         }
     }
 
     fn to_string(&self) -> String {
         match &self {
             Callable::Class(class) => class.to_string(),
+            Callable::Native(_, _) => "<native fn>".to_string(),
             Callable::User(fun) => fun.to_string(),
-            Callable::BuiltIn(_, _) => "<builtin fn>".to_string(),
         }
     }
 }
@@ -145,7 +145,7 @@ impl PartialEq for Callable {
                 // compare raw pointers to FunctionDecl
                 a.decl_ptr == b.decl_ptr
             }
-            (Callable::BuiltIn(_, a), Callable::BuiltIn(_, b)) => Rc::ptr_eq(a, b),
+            (Callable::Native(_, a), Callable::Native(_, b)) => Rc::ptr_eq(a, b),
             _ => false,
         }
     }
@@ -275,10 +275,10 @@ struct Environment {
 }
 
 impl Environment {
-    fn new_shared() -> Shared<Self> {
-        Rc::new(RefCell::new(Environment {
+    fn new_shared_with_initial_values(values: HashMap<String, Value>) -> Shared<Self> {
+        Rc::new(RefCell::new(Self {
             enclosing: None,
-            values: HashMap::new(),
+            values,
         }))
     }
 
@@ -287,6 +287,10 @@ impl Environment {
             enclosing: Some(enclosing),
             values: HashMap::new(),
         }))
+    }
+
+    fn local_names(&self) -> Vec<&str> {
+        self.values.keys().map(|s| s.as_str()).collect()
     }
 
     fn get_from_ancestor(&self, distance: usize, name: &str) -> Result<Value, String> {
@@ -448,10 +452,36 @@ pub struct Interpreter {
 }
 
 impl Interpreter {
+    fn initial_global_values() -> HashMap<String, Value> {
+        let program_started = std::time::SystemTime::now();
+
+        let clock_function = Callable::new_native_function(
+            0, // arity
+            move |_, _| -> Result<Value, String> {
+                let elapsed = program_started
+                    .elapsed()
+                    .map_err(|e| e.to_string())?
+                    .as_secs_f64();
+                Ok(Value::Number(elapsed))
+            },
+        );
+
+        let mut map = HashMap::new();
+        map.insert("clock".to_string(), Value::Callable(clock_function));
+        map
+    }
+
     pub fn new() -> Self {
-        Interpreter {
-            current_environment: Environment::new_shared(),
-            name_resolver: NameResolver::new(),
+        let env = Environment::new_shared_with_initial_values(Self::initial_global_values());
+        let initial_names = env
+            .borrow()
+            .local_names()
+            .into_iter()
+            .map(|name| name.to_string())
+            .collect();
+        Self {
+            current_environment: env,
+            name_resolver: NameResolver::new(initial_names),
         }
     }
 
