@@ -34,7 +34,7 @@ impl<'a> Lexer<'a> {
     fn advance_char(&mut self) -> char {
         let c = self.peek();
         self.source = &self.source[self.peek().len_utf8()..];
-        self.loc.advance_column();
+        self.loc.advance_column(c);
         c
     }
 
@@ -52,8 +52,9 @@ impl<'a> Lexer<'a> {
         let mut lexeme = String::from("\"");
 
         while !self.is_at_end() && self.peek() != '"' {
-            if self.peek() == '\n' {
-                self.loc.advance_line();
+            let c = self.peek();
+            if c == '\n' {
+                self.loc.advance_line(c);
             }
             lexeme.push(self.advance_char());
         }
@@ -194,7 +195,7 @@ impl<'a> Iterator for Lexer<'a> {
 
                 // newline
                 '\n' => {
-                    self.loc.advance_line();
+                    self.loc.advance_line(c);
                     continue;
                 }
 

@@ -3,7 +3,8 @@ use std::io::Write;
 use langlang::interpreter::Interpreter;
 use langlang::lexer::Lexer;
 use langlang::parser::parse_program;
-use langlang::token::Token;
+use langlang::source_location::SourceRange;
+use langlang::token::{Token, TokenKind};
 
 fn usage() {
     println!("usage: langlang [script]");
@@ -16,6 +17,25 @@ fn interpret(interp: &mut Interpreter, source: &str) -> bool {
         Ok(prog) => prog,
         Err(error) => {
             eprintln!("Syntax error: {}", error);
+            match &error.error_token {
+                Some(token) => {
+                    let range = SourceRange::line_of(source, &token.location);
+                    let source_line = range.as_str(source);
+
+                    // print the line number and corresponding source line
+                    eprintln!("{:>4} | {}", range.line(), source_line);
+
+                    // if we have encountered EOF, point at one position past the end of the line
+                    let column = if token.kind == TokenKind::Eof {
+                        source_line.len()
+                    } else {
+                        token.location.column
+                    };
+
+                    eprintln!("     | {}^", " ".repeat(column));
+                }
+                _ => (),
+            };
             return false;
         }
     };

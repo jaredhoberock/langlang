@@ -7,7 +7,7 @@ use restore_macros::restore_self_on_err;
 pub struct ParseError {
     message: String,
     remaining_len: usize,
-    error_token: Option<Token>,
+    pub error_token: Option<Token>,
 }
 
 impl ParseError {
@@ -43,11 +43,7 @@ impl ParseError {
 
 impl std::fmt::Display for ParseError {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        let message = match &self.error_token {
-            None => format!("at end of input: {}", self.message),
-            Some(tok) => format!("at {}: '{}': {}", tok.location, tok.lexeme, self.message),
-        };
-        write!(f, "{}", message)
+        write!(f, "{}", self.message)
     }
 }
 
